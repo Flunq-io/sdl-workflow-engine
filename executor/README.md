@@ -93,7 +93,7 @@ Injects data/variables into the workflow context.
 {
   "id": "task-completed-task-initialize-123",
   "type": "io.flunq.task.completed",
-  "source": "task-service",
+  "source": "executor-service",
   "workflow_id": "simple-test-workflow",
   "data": {
     "task_id": "task-initialize-123",

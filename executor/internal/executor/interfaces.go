@@ -39,13 +39,15 @@ type TaskConfig struct {
 
 // TaskResult represents the result of task execution
 type TaskResult struct {
-	TaskID     string                 `json:"task_id"`
-	TaskName   string                 `json:"task_name"`
-	Success    bool                   `json:"success"`
-	Output     map[string]interface{} `json:"output"`
-	Error      string                 `json:"error,omitempty"`
-	Duration   time.Duration          `json:"duration"`
-	ExecutedAt time.Time              `json:"executed_at"`
+	TaskID      string                 `json:"task_id"`
+	TaskName    string                 `json:"task_name"`
+	WorkflowID  string                 `json:"workflow_id"`
+	ExecutionID string                 `json:"execution_id"`
+	Success     bool                   `json:"success"`
+	Output      map[string]interface{} `json:"output"`
+	Error       string                 `json:"error,omitempty"`
+	Duration    time.Duration          `json:"duration"`
+	ExecutedAt  time.Time              `json:"executed_at"`
 }
 
 // ParseTaskRequestFromEvent parses a CloudEvent into a TaskRequest

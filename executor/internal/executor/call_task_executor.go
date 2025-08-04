@@ -126,12 +126,14 @@ func (e *CallTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*Tas
 		zap.Duration("duration", duration))
 
 	return &TaskResult{
-		TaskID:     task.TaskID,
-		TaskName:   task.TaskName,
-		Success:    success,
-		Output:     output,
-		Duration:   duration,
-		ExecutedAt: startTime,
+		TaskID:      task.TaskID,
+		TaskName:    task.TaskName,
+		WorkflowID:  task.WorkflowID,
+		ExecutionID: task.ExecutionID,
+		Success:     success,
+		Output:      output,
+		Duration:    duration,
+		ExecutedAt:  startTime,
 	}, nil
 }
 
@@ -144,12 +146,14 @@ func (e *CallTaskExecutor) createErrorResult(task *TaskRequest, startTime time.T
 		zap.Duration("duration", duration))
 
 	return &TaskResult{
-		TaskID:     task.TaskID,
-		TaskName:   task.TaskName,
-		Success:    false,
-		Output:     map[string]interface{}{},
-		Error:      errorMsg,
-		Duration:   duration,
-		ExecutedAt: startTime,
+		TaskID:      task.TaskID,
+		TaskName:    task.TaskName,
+		WorkflowID:  task.WorkflowID,
+		ExecutionID: task.ExecutionID,
+		Success:     false,
+		Output:      map[string]interface{}{},
+		Error:       errorMsg,
+		Duration:    duration,
+		ExecutedAt:  startTime,
 	}, nil
 }

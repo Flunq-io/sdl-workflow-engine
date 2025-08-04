@@ -130,23 +130,28 @@ func (s *RedisEventStreamSubscription) readFromStreams(ctx context.Context) {
 	// Discover workflow streams dynamically
 	workflowStreams, err := s.discoverWorkflowStreams(ctx)
 	if err != nil {
-		s.logger.Debug("Failed to discover workflow streams", zap.Error(err))
+		s.logger.Error("Failed to discover workflow streams", zap.Error(err))
 		time.Sleep(1 * time.Second)
 		return
 	}
 
 	if len(workflowStreams) == 0 {
 		// No workflow streams exist yet, wait and retry
+		s.logger.Debug("No workflow streams found, waiting...")
 		time.Sleep(1 * time.Second)
 		return
 	}
 
+	s.logger.Debug("Discovered workflow streams", zap.Strings("streams", workflowStreams))
+
 	// Build streams array with proper stream:id pairs
-	// Format: [stream1, "0", stream2, "0", ...] to read all unprocessed messages
+	// Format: [stream1, ">", stream2, ">", ...] to read only new messages for consumer group
 	streamsWithIDs := make([]string, 0, len(workflowStreams)*2)
 	for _, stream := range workflowStreams {
-		streamsWithIDs = append(streamsWithIDs, stream, "0")
+		streamsWithIDs = append(streamsWithIDs, stream, ">")
 	}
+
+	s.logger.Debug("Reading from streams", zap.Strings("streams_with_ids", streamsWithIDs))
 
 	// Read from all workflow streams
 	streams, err := s.client.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -159,10 +164,15 @@ func (s *RedisEventStreamSubscription) readFromStreams(ctx context.Context) {
 
 	if err != nil {
 		if err != redis.Nil && !isNoGroupError(err) && !isInvalidStreamIDError(err) {
+			s.logger.Error("Failed to read from Redis Stream", zap.Error(err))
 			s.errorsCh <- fmt.Errorf("failed to read from Redis Stream: %w", err)
+		} else {
+			s.logger.Debug("No new messages or expected error", zap.Error(err))
 		}
 		return
 	}
+
+	s.logger.Debug("Read streams result", zap.Int("stream_count", len(streams)))
 
 	// Process messages
 	for _, stream := range streams {
@@ -203,7 +213,7 @@ func (s *RedisEventStreamSubscription) discoverWorkflowStreams(ctx context.Conte
 
 	// Ensure consumer groups exist for discovered streams
 	for _, streamKey := range keys {
-		err := s.client.XGroupCreateMkStream(ctx, streamKey, s.consumerGroup, "0").Err()
+		err := s.client.XGroupCreateMkStream(ctx, streamKey, s.consumerGroup, "$").Err()
 		if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 			s.logger.Warn("Failed to create consumer group",
 				zap.String("stream", streamKey),

@@ -64,11 +64,13 @@ func (e *SetTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*Task
 		zap.Int("variables_set", len(output)))
 
 	return &TaskResult{
-		TaskID:     task.TaskID,
-		TaskName:   task.TaskName,
-		Success:    true,
-		Output:     output,
-		Duration:   duration,
-		ExecutedAt: startTime,
+		TaskID:      task.TaskID,
+		TaskName:    task.TaskName,
+		WorkflowID:  task.WorkflowID,
+		ExecutionID: task.ExecutionID,
+		Success:     true,
+		Output:      output,
+		Duration:    duration,
+		ExecutedAt:  startTime,
 	}, nil
 }

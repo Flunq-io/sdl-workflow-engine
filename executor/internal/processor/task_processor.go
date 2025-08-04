@@ -160,9 +160,12 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 func (p *TaskProcessor) publishTaskCompletedEvent(ctx context.Context, result *executor.TaskResult) error {
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-completed-%s", result.TaskID),
-		Source:      "task-service",
+		Source:      "executor-service", // Changed from "task-service"
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.completed",
+		WorkflowID:  result.WorkflowID,  // ← Add this
+		ExecutionID: result.ExecutionID, // ← Add this
+		TaskID:      result.TaskID,      // ← Add this
 		Time:        time.Now(),
 		Data: map[string]interface{}{
 			"task_id":     result.TaskID,
