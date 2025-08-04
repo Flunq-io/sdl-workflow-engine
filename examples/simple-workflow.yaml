@@ -1,0 +1,36 @@
+document:
+  dsl: '1.0.0'
+  namespace: flunq-examples
+  name: simple-test-workflow
+  version: '1.0.0'
+  description: A simple workflow to test Worker service with DSL 1.0.0
+
+schedule:
+  on:
+    any:
+      - with:
+          type: io.flunq.execution.started
+
+do:
+  - initialize:
+      set:
+        message: "Workflow started with DSL 1.0.0"
+        timestamp: "${ now() }"
+        user_id: "${ $workflow.input.user_id }"
+        status: "initialized"
+
+  - processData:
+      set:
+        processed: true
+        processing_time: "${ now() }"
+        result: "Data processed successfully"
+
+  - waitStep:
+      wait:
+        duration: PT2S
+
+  - finalize:
+      set:
+        final_status: "completed"
+        completion_time: "${ now() }"
+        summary: "Workflow completed successfully"

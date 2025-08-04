@@ -1,0 +1,316 @@
+syntax = "proto3";
+
+package flunq.worker.v1;
+
+option go_package = "github.com/flunq-io/worker/proto/gen";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// TaskData represents input/output data for a task
+message TaskData {
+  // Task input data as JSON
+  google.protobuf.Struct input = 1;
+  
+  // Task output data as JSON
+  google.protobuf.Struct output = 2;
+  
+  // Task metadata
+  TaskMetadata metadata = 3;
+}
+
+// TaskMetadata contains execution metadata for a task
+message TaskMetadata {
+  // Task execution start time
+  google.protobuf.Timestamp started_at = 1;
+  
+  // Task execution completion time
+  google.protobuf.Timestamp completed_at = 2;
+  
+  // Task execution duration in milliseconds
+  int64 duration_ms = 3;
+  
+  // Task execution status
+  TaskStatus status = 4;
+  
+  // Error message if task failed
+  string error_message = 5;
+  
+  // Retry count
+  int32 retry_count = 6;
+  
+  // Task type (call, run, for, if, switch, try, emit, wait, set)
+  string task_type = 7;
+  
+  // Queue name where task was executed
+  string queue = 8;
+  
+  // Activity name that executed the task
+  string activity_name = 9;
+}
+
+// TaskStatus represents the status of a task execution
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+  TASK_STATUS_RETRYING = 6;
+}
+
+// WorkflowState represents the complete state of a workflow execution
+message WorkflowState {
+  // Workflow ID
+  string workflow_id = 1;
+  
+  // Current step/state name
+  string current_step = 2;
+  
+  // Workflow status
+  WorkflowStatus status = 3;
+  
+  // Workflow variables as JSON
+  google.protobuf.Struct variables = 4;
+  
+  // Workflow input data
+  google.protobuf.Struct input = 5;
+  
+  // Workflow output data (when completed)
+  google.protobuf.Struct output = 6;
+  
+  // Execution context
+  ExecutionContext context = 7;
+  
+  // Completed tasks
+  repeated CompletedTask completed_tasks = 8;
+  
+  // Pending tasks
+  repeated PendingTask pending_tasks = 9;
+  
+  // Workflow creation time
+  google.protobuf.Timestamp created_at = 10;
+  
+  // Last update time
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// WorkflowStatus represents the status of a workflow
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_STATUS_CREATED = 1;
+  WORKFLOW_STATUS_RUNNING = 2;
+  WORKFLOW_STATUS_COMPLETED = 3;
+  WORKFLOW_STATUS_FAILED = 4;
+  WORKFLOW_STATUS_CANCELLED = 5;
+  WORKFLOW_STATUS_SUSPENDED = 6;
+}
+
+// ExecutionContext contains workflow execution context
+message ExecutionContext {
+  // Execution ID
+  string execution_id = 1;
+  
+  // Correlation ID
+  string correlation_id = 2;
+  
+  // Parent workflow ID (for sub-workflows)
+  string parent_workflow_id = 3;
+  
+  // Parent task ID (for sub-workflows)
+  string parent_task_id = 4;
+  
+  // Execution trigger (manual, event, schedule, etc.)
+  string trigger = 5;
+  
+  // User who initiated the execution
+  string initiated_by = 6;
+  
+  // Tenant/organization ID
+  string tenant_id = 7;
+  
+  // Region
+  string region = 8;
+}
+
+// CompletedTask represents a completed task in the workflow
+message CompletedTask {
+  // Task name
+  string name = 1;
+  
+  // Task data (input/output)
+  TaskData data = 2;
+  
+  // Next task name (if any)
+  string next_task = 3;
+}
+
+// PendingTask represents a pending task in the workflow
+message PendingTask {
+  // Task name
+  string name = 1;
+  
+  // Task input data
+  google.protobuf.Struct input = 2;
+  
+  // Task type
+  string task_type = 3;
+  
+  // Queue name
+  string queue = 4;
+  
+  // Activity name
+  string activity_name = 5;
+  
+  // Task creation time
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// WorkflowDefinition represents a Serverless Workflow DSL definition
+message WorkflowDefinition {
+  // Workflow ID
+  string id = 1;
+  
+  // Workflow name
+  string name = 2;
+  
+  // Workflow description
+  string description = 3;
+  
+  // Workflow version
+  string version = 4;
+  
+  // Serverless Workflow spec version
+  string spec_version = 5;
+  
+  // Complete DSL definition as JSON
+  google.protobuf.Struct dsl_definition = 6;
+  
+  // Start state name
+  string start_state = 7;
+  
+  // Functions defined in the workflow
+  repeated FunctionDefinition functions = 8;
+  
+  // Events defined in the workflow
+  repeated EventDefinition events = 9;
+}
+
+// FunctionDefinition represents a function in the workflow
+message FunctionDefinition {
+  // Function name
+  string name = 1;
+  
+  // Function type (rest, rpc, expression, etc.)
+  string type = 2;
+  
+  // Function operation (URL, method, etc.)
+  string operation = 3;
+  
+  // Function metadata
+  google.protobuf.Struct metadata = 4;
+}
+
+// EventDefinition represents an event in the workflow
+message EventDefinition {
+  // Event name
+  string name = 1;
+  
+  // Event type
+  string type = 2;
+  
+  // Event source
+  string source = 3;
+  
+  // Event correlation rules
+  google.protobuf.Struct correlation = 4;
+}
+
+// TaskRequestedEvent represents a task that needs to be executed
+message TaskRequestedEvent {
+  // Workflow ID
+  string workflow_id = 1;
+  
+  // Execution ID
+  string execution_id = 2;
+  
+  // Task name
+  string task_name = 3;
+  
+  // Task input data
+  google.protobuf.Struct input = 4;
+  
+  // Task configuration
+  TaskConfiguration config = 5;
+  
+  // Execution context
+  ExecutionContext context = 6;
+}
+
+// TaskConfiguration contains task execution configuration
+message TaskConfiguration {
+  // Task type (call, run, etc.)
+  string task_type = 1;
+  
+  // Queue name
+  string queue = 2;
+  
+  // Activity name
+  string activity_name = 3;
+  
+  // Timeout configuration
+  TimeoutConfiguration timeout = 4;
+  
+  // Retry configuration
+  RetryConfiguration retry = 5;
+  
+  // Task metadata
+  google.protobuf.Struct metadata = 6;
+}
+
+// TimeoutConfiguration contains timeout settings
+message TimeoutConfiguration {
+  // Start to close timeout in seconds
+  int32 start_to_close_seconds = 1;
+  
+  // Schedule to start timeout in seconds
+  int32 schedule_to_start_seconds = 2;
+  
+  // Schedule to close timeout in seconds
+  int32 schedule_to_close_seconds = 3;
+}
+
+// RetryConfiguration contains retry settings
+message RetryConfiguration {
+  // Maximum retry attempts
+  int32 max_attempts = 1;
+  
+  // Initial retry interval in seconds
+  int32 initial_interval_seconds = 2;
+  
+  // Backoff coefficient
+  double backoff_coefficient = 3;
+  
+  // Maximum interval in seconds
+  int32 maximum_interval_seconds = 4;
+}
+
+// TaskCompletedEvent represents a completed task
+message TaskCompletedEvent {
+  // Workflow ID
+  string workflow_id = 1;
+  
+  // Execution ID
+  string execution_id = 2;
+  
+  // Task name
+  string task_name = 3;
+  
+  // Task data (input/output)
+  TaskData data = 4;
+  
+  // Execution context
+  ExecutionContext context = 5;
+}

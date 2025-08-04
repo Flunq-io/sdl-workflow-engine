@@ -1,150 +1,160 @@
 # Executor Service
 
-The Executor service handles external API calls, HTTP requests, and integrations with third-party services.
+The Executor Service is responsible for executing individual workflow tasks. It subscribes to `task.requested` events and publishes `task.completed` events.
 
-## 🏗️ Architecture
-
-```
-┌─────────────────┐
-│  HTTP Client    │
-│  (Retries/CB)   │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Rate Limiter   │
-│  (Token Bucket) │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Auth Manager   │
-│  (OAuth/JWT)    │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Task Queue     │
-│  (Redis/Memory) │
-└─────────────────┘
-```
-
-## 🚀 Features
-
-- **HTTP Client**: Configurable HTTP client with timeouts
-- **Retry Logic**: Exponential backoff with jitter
-- **Circuit Breaker**: Fail-fast for unhealthy services
-- **Rate Limiting**: Token bucket and sliding window
-- **Authentication**: OAuth2, JWT, API keys
-- **Request/Response Transformation**: JSON, XML, form data
-- **Monitoring**: Request metrics and tracing
-
-## 📁 Structure
+## Architecture
 
 ```
-executor/
-├── cmd/
-│   └── server/
-│       └── main.go
-├── internal/
-│   ├── client/
-│   ├── auth/
-│   ├── ratelimit/
-│   └── handlers/
-├── pkg/
-│   ├── http/
-│   ├── retry/
-│   └── circuit/
-├── configs/
-├── Dockerfile
-├── go.mod
-└── README.md
+Worker Service → task.requested → Executor Service → task.completed → Worker Service
 ```
 
-## 🔧 Configuration
+## Supported Task Types
 
-Environment variables:
-- `PORT`: Server port (default: 8083)
-- `REDIS_URL`: Redis connection string
-- `DEFAULT_TIMEOUT`: Default HTTP timeout (default: 30s)
-- `MAX_RETRIES`: Maximum retry attempts (default: 3)
-- `RATE_LIMIT`: Requests per second (default: 100)
+### 1. Set Task (`set`)
+Sets variables in the workflow context.
 
-## 🚀 Quick Start
-
-```bash
-# Install dependencies
-go mod tidy
-
-# Run locally
-go run cmd/server/main.go
-
-# Build
-go build -o bin/executor cmd/server/main.go
-
-# Run with Docker
-docker build -t flunq-executor .
-docker run -p 8083:8083 flunq-executor
+**Example Configuration:**
+```yaml
+- name: initialize
+  type: set
+  config:
+    parameters:
+      user_id: "12345"
+      status: "active"
+      timestamp: "2024-01-01T00:00:00Z"
 ```
 
-## 📚 API Endpoints
+### 2. Call Task (`call`)
+Makes HTTP/API calls to external services.
 
-### Task Execution
-- `POST /api/v1/execute` - Execute HTTP task
-- `GET /api/v1/executions/{id}` - Get execution status
-- `POST /api/v1/executions/{id}/cancel` - Cancel execution
+**Example Configuration:**
+```yaml
+- name: fetch_user_data
+  type: call
+  config:
+    parameters:
+      url: "https://api.example.com/users/12345"
+      method: "GET"
+      headers:
+        Authorization: "Bearer token123"
+        Content-Type: "application/json"
+```
 
-### Configuration
-- `POST /api/v1/configs` - Create configuration
-- `GET /api/v1/configs` - List configurations
-- `PUT /api/v1/configs/{id}` - Update configuration
+### 3. Wait Task (`wait`)
+Waits for a specified duration.
 
-## 🔧 Execution Types
+**Example Configuration:**
+```yaml
+- name: delay_step
+  type: wait
+  config:
+    parameters:
+      duration: "5s"  # or use "seconds": 5
+```
 
-### HTTP Executions
+### 4. Inject Task (`inject`)
+Injects data/variables into the workflow context.
+
+**Example Configuration:**
+```yaml
+- name: inject_metadata
+  type: inject
+  config:
+    parameters:
+      environment: "production"
+      region: "us-east-1"
+      version: "1.0.0"
+```
+
+## Event Flow
+
+### Input: `task.requested`
 ```json
 {
-  "type": "http",
-  "method": "POST",
-  "url": "https://api.example.com/users",
-  "headers": {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer ${token}"
-  },
-  "body": {
-    "name": "John Doe",
-    "email": "john@example.com"
-  },
-  "timeout": "30s",
-  "retries": 3
-}
-```
-
-### GraphQL Executions
-```json
-{
-  "type": "graphql",
-  "endpoint": "https://api.example.com/graphql",
-  "query": "mutation CreateUser($input: UserInput!) { createUser(input: $input) { id name } }",
-  "variables": {
-    "input": {
-      "name": "John Doe",
-      "email": "john@example.com"
+  "id": "task-req-123",
+  "type": "io.flunq.task.requested",
+  "source": "worker-service",
+  "workflow_id": "simple-test-workflow",
+  "data": {
+    "task_id": "task-initialize-123",
+    "task_name": "initialize",
+    "task_type": "set",
+    "config": {
+      "parameters": {
+        "user_id": "12345"
+      }
     }
   }
 }
 ```
 
-### Database Executions
+### Output: `task.completed`
 ```json
 {
-  "type": "database",
-  "connection": "postgres://user:pass@localhost/db",
-  "query": "INSERT INTO users (name, email) VALUES ($1, $2)",
-  "params": ["John Doe", "john@example.com"]
+  "id": "task-completed-task-initialize-123",
+  "type": "io.flunq.task.completed",
+  "source": "task-service",
+  "workflow_id": "simple-test-workflow",
+  "data": {
+    "task_id": "task-initialize-123",
+    "task_name": "initialize",
+    "success": true,
+    "output": {
+      "user_id": "12345"
+    },
+    "duration_ms": 15,
+    "executed_at": "2024-01-01T00:00:00Z"
+  }
 }
 ```
 
-## 🔄 Retry Policies
+## Running the Service
 
-- **Fixed Delay**: Wait fixed time between retries
-- **Exponential Backoff**: Exponentially increase delay
-- **Linear Backoff**: Linearly increase delay
-- **Custom**: User-defined retry logic
+### Prerequisites
+- Redis running on `localhost:6379`
+- Event Store service running on `localhost:8081`
+
+### Start the Service
+```bash
+cd executor
+go run cmd/server/main.go
+```
+
+### Environment Variables
+- `EVENTS_URL`: Event Store URL (default: `http://localhost:8081`)
+- `REDIS_URL`: Redis URL (default: `localhost:6379`)
+- `REDIS_PASSWORD`: Redis password (default: empty)
+- `LOG_LEVEL`: Log level (default: `info`)
+
+## Adding New Task Types
+
+1. Create a new executor in `internal/executor/`
+2. Implement the `TaskExecutor` interface
+3. Register it in `cmd/server/main.go`
+
+Example:
+```go
+// internal/executor/my_task_executor.go
+type MyTaskExecutor struct {
+    logger *zap.Logger
+}
+
+func (e *MyTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*TaskResult, error) {
+    // Implementation here
+}
+
+func (e *MyTaskExecutor) GetTaskType() string {
+    return "my_task"
+}
+```
+
+Register in main.go:
+```go
+taskExecutors := map[string]executor.TaskExecutor{
+    "set":     executor.NewSetTaskExecutor(zapLogger),
+    "call":    executor.NewCallTaskExecutor(zapLogger),
+    "wait":    executor.NewWaitTaskExecutor(zapLogger),
+    "inject":  executor.NewInjectTaskExecutor(zapLogger),
+    "my_task": executor.NewMyTaskExecutor(zapLogger), // Add here
+}
+```

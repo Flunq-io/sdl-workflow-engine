@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package flunq.worker.v1;
+
+option go_package = "github.com/flunq-io/worker/proto/gen";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// TaskScheduledEvent represents a task that has been scheduled for execution
+message TaskScheduledEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string task_id = 4;
+  string task_name = 5;
+  string task_type = 6;
+  google.protobuf.Struct task_definition = 7;
+  google.protobuf.Struct input_data = 8;
+  google.protobuf.Timestamp scheduled_at = 9;
+  string scheduled_by = 10;
+  int32 retry_count = 11;
+  string correlation_id = 12;
+}
+
+// TaskStartedEvent represents a task that has begun execution
+message TaskStartedEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string task_id = 4;
+  string task_name = 5;
+  string task_type = 6;
+  google.protobuf.Struct input_data = 7;
+  google.protobuf.Timestamp started_at = 8;
+  string worker_id = 9;
+  string worker_version = 10;
+  int32 attempt_number = 11;
+  string correlation_id = 12;
+}
+
+// TaskCompletedEvent represents a task that has completed successfully
+message TaskCompletedEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string task_id = 4;
+  string task_name = 5;
+  string task_type = 6;
+  google.protobuf.Struct input_data = 7;
+  google.protobuf.Struct output_data = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  string worker_id = 11;
+  int64 duration_ms = 12;
+  string correlation_id = 13;
+}
+
+// TaskFailedEvent represents a task that has failed
+message TaskFailedEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string task_id = 4;
+  string task_name = 5;
+  string task_type = 6;
+  google.protobuf.Struct input_data = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp failed_at = 9;
+  string worker_id = 10;
+  string error_type = 11;
+  string error_message = 12;
+  string error_stack_trace = 13;
+  int32 attempt_number = 14;
+  bool will_retry = 15;
+  google.protobuf.Timestamp next_retry_at = 16;
+  string correlation_id = 17;
+}
+
+// ExecutionStartedEvent represents a workflow execution that has started
+message ExecutionStartedEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string workflow_name = 4;
+  string workflow_version = 5;
+  google.protobuf.Struct input_data = 6;
+  google.protobuf.Timestamp started_at = 7;
+  string started_by = 8;
+  string correlation_id = 9;
+  repeated string tags = 10;
+  google.protobuf.Struct metadata = 11;
+}
+
+// ExecutionCompletedEvent represents a workflow execution that has completed
+message ExecutionCompletedEvent {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  google.protobuf.Struct input_data = 4;
+  google.protobuf.Struct output_data = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp completed_at = 7;
+  int64 duration_ms = 8;
+  int32 total_tasks = 9;
+  int32 completed_tasks = 10;
+  int32 failed_tasks = 11;
+  string correlation_id = 12;
+}
+
+// WorkflowState represents the current state of a workflow execution
+message WorkflowState {
+  string tenant_id = 1;
+  string workflow_id = 2;
+  string execution_id = 3;
+  string current_task = 4;
+  google.protobuf.Struct context_data = 5;
+  google.protobuf.Timestamp last_updated = 6;
+  string status = 7; // RUNNING, COMPLETED, FAILED, CANCELLED
+  repeated string completed_tasks = 8;
+  repeated string failed_tasks = 9;
+  int32 retry_count = 10;
+  string correlation_id = 11;
+}

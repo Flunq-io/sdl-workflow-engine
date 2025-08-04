@@ -40,10 +40,14 @@ func (r *RedisStorage) Store(ctx context.Context, event *cloudevents.CloudEvent)
 		event.Time = time.Now()
 	}
 
-	// Serialize event data
-	eventData, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+	// Serialize only the event data (not the entire CloudEvent)
+	var eventDataStr string
+	if event.Data != nil {
+		eventDataBytes, err := json.Marshal(event.Data)
+		if err != nil {
+			return fmt.Errorf("failed to marshal event data: %w", err)
+		}
+		eventDataStr = string(eventDataBytes)
 	}
 
 	// Create stream key based on workflow ID
@@ -57,8 +61,10 @@ func (r *RedisStorage) Store(ctx context.Context, event *cloudevents.CloudEvent)
 			"event_type":   event.Type,
 			"source":       event.Source,
 			"workflow_id":  event.WorkflowID,
-			"data":         string(eventData),
-			"timestamp":    event.Time.Unix(),
+			"execution_id": event.ExecutionID,
+			"task_id":      event.TaskID,
+			"data":         eventDataStr,
+			"timestamp":    event.Time.Format(time.RFC3339),
 			"spec_version": event.SpecVersion,
 		},
 	}
@@ -68,26 +74,8 @@ func (r *RedisStorage) Store(ctx context.Context, event *cloudevents.CloudEvent)
 		return fmt.Errorf("failed to store event in Redis: %w", err)
 	}
 
-	// Also store in global event stream for cross-workflow queries
-	globalArgs := &redis.XAddArgs{
-		Stream: "events:global",
-		Values: map[string]interface{}{
-			"event_id":     event.ID,
-			"event_type":   event.Type,
-			"source":       event.Source,
-			"workflow_id":  event.WorkflowID,
-			"data":         string(eventData),
-			"timestamp":    event.Time.Unix(),
-			"spec_version": event.SpecVersion,
-			"stream_id":    messageID,
-		},
-	}
-
-	_, err = r.client.XAdd(ctx, globalArgs).Result()
-	if err != nil {
-		r.logger.Error("Failed to store event in global stream", zap.Error(err))
-		// Don't fail the operation, just log the error
-	}
+	// Note: Removed global stream storage for cleaner architecture
+	// Each workflow has its own isolated event stream
 
 	r.logger.Debug("Event stored successfully",
 		zap.String("event_id", event.ID),
@@ -148,12 +136,13 @@ func (r *RedisStorage) GetSince(ctx context.Context, workflowID string, since st
 	return events, nil
 }
 
-// GetStream retrieves events from a specific stream
+// GetStream retrieves events from a specific workflow stream
 func (r *RedisStorage) GetStream(ctx context.Context, streamID string, count int64) ([]*cloudevents.CloudEvent, error) {
-	// Read events from the global stream
-	result, err := r.client.XRevRange(ctx, "events:global", "+", "-").Result()
+	// Read events from the specified workflow stream
+	streamKey := fmt.Sprintf("events:workflow:%s", streamID)
+	result, err := r.client.XRevRange(ctx, streamKey, "+", "-").Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read events from global stream: %w", err)
+		return nil, fmt.Errorf("failed to read events from workflow stream %s: %w", streamKey, err)
 	}
 
 	// Limit results if count is specified
@@ -194,20 +183,24 @@ func (r *RedisStorage) Delete(ctx context.Context, workflowID string) error {
 func (r *RedisStorage) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
 
-	// Get global stream length
-	globalLen, err := r.client.XLen(ctx, "events:global").Result()
-	if err != nil {
-		r.logger.Error("Failed to get global stream length", zap.Error(err))
-	} else {
-		stats["total_events"] = globalLen
-	}
+	// Count total events across all workflow streams
+	totalEvents := int64(0)
 
-	// Get workflow stream count
+	// Get workflow stream count and total events
 	keys, err := r.client.Keys(ctx, "events:workflow:*").Result()
 	if err != nil {
 		r.logger.Error("Failed to get workflow stream keys", zap.Error(err))
 	} else {
 		stats["workflow_count"] = len(keys)
+
+		// Count events in each workflow stream
+		for _, key := range keys {
+			length, err := r.client.XLen(ctx, key).Result()
+			if err == nil {
+				totalEvents += length
+			}
+		}
+		stats["total_events"] = totalEvents
 	}
 
 	// Get Redis info

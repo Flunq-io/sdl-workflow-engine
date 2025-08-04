@@ -1,6 +1,34 @@
 # Worker Service
 
-The Worker service executes workflow definitions using the Serverless Workflow DSL.
+The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration.
+
+## 🚀 Features
+
+### **Serverless Workflow Integration**
+- ✅ **Official SDK**: Uses `github.com/serverlessworkflow/sdk-go` for DSL parsing and execution
+- ✅ **SDL Task Types**: Supports call, run, for, if, switch, try, emit, wait, set tasks
+- ✅ **SDK Validation**: Leverages SDK's built-in validation and workflow model
+- ✅ **State Management**: Uses SDK's workflow execution engine as foundation
+
+### **Core Event Processing Pattern**
+Every workflow event triggers this exact sequence:
+1. **Fetch Complete Event History** - Get ALL events from beginning
+2. **Rebuild Complete Workflow State** - Replay events using SDK state management
+3. **Process New Event** - Apply newest event to rebuilt state
+4. **Execute Next SDL Step** - Use SDK to determine and execute next action
+5. **Update Workflow Record** - Persist state changes to database
+
+### **Event Data Storage with Protobuf**
+- 🚧 **JSON Serialization**: Currently using JSON (protobuf implementation in progress)
+- ✅ **Task Input/Output**: Complete task data serialized in events
+- ✅ **Cross-Language Compatibility**: JSON enables multi-language support
+- 🚧 **Schema Evolution**: Protobuf support planned for better efficiency
+
+### **Generic Interface Architecture**
+- ✅ **EventStore Interface**: Switch between Redis, Kafka, EventStore DB
+- ✅ **Database Interface**: Switch between Redis, PostgreSQL, MongoDB
+- ✅ **WorkflowEngine Interface**: Pluggable workflow execution engines
+- ✅ **Circuit Breaker**: Resilient EventStore calls with failure handling
 
 ## 🏗️ Architecture
 
@@ -73,15 +101,21 @@ Environment variables:
 # Install dependencies
 go mod tidy
 
-# Run locally
-go run cmd/worker/main.go
+# Build the service
+go build -o bin/worker cmd/server/main.go
 
-# Build
-go build -o bin/worker cmd/worker/main.go
+# Run the service (requires Event Store and Redis)
+./bin/worker
+go run cmd/server/main.go
 
-# Run with Docker
-docker build -t flunq-worker .
-docker run flunq-worker
+# Run tests
+go test ./internal/processor -v
+
+# Test all components
+go test ./... -v
+
+# Run example (requires Event Store service)
+go run examples/worker-example.go
 ```
 
 ## 🔄 Workflow States

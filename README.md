@@ -92,7 +92,9 @@ See individual service READMEs for detailed setup instructions.
 - [ ] Core DSL parser and validator
 - [ ] Redis-based event streaming
 - [ ] Basic workflow execution engine
+- [ ] Enforcing retry policies and try/catch handlers
 - [ ] REST API endpoints
+- [ ] Integration into services for managing security material
 - [ ] Web UI dashboard
 - [ ] Pluggable storage backends
 - [ ] Advanced monitoring and observability

@@ -1,0 +1,609 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"gopkg.in/yaml.v3"
+
+	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/worker/internal/interfaces"
+	"github.com/flunq-io/worker/proto/gen"
+)
+
+// ServerlessWorkflowEngine implements the WorkflowEngine interface using the official Serverless Workflow SDK
+type ServerlessWorkflowEngine struct {
+	logger interfaces.Logger
+}
+
+// NewServerlessWorkflowEngine creates a new Serverless Workflow engine
+func NewServerlessWorkflowEngine(logger interfaces.Logger) interfaces.WorkflowEngine {
+	return &ServerlessWorkflowEngine{
+		logger: logger,
+	}
+}
+
+// ParseDefinition parses a Serverless Workflow DSL definition
+// Supports both DSL 1.0.0 (YAML) and DSL 0.8 (JSON) formats
+func (e *ServerlessWorkflowEngine) ParseDefinition(ctx context.Context, dslData []byte) (*gen.WorkflowDefinition, error) {
+	// Try to parse as YAML first (DSL 1.0.0), then JSON (DSL 0.8)
+	var dslMap map[string]interface{}
+
+	// Try YAML first
+	if err := yaml.Unmarshal(dslData, &dslMap); err != nil {
+		// Try JSON
+		if err := json.Unmarshal(dslData, &dslMap); err != nil {
+			e.logger.Error("Failed to parse workflow DSL as YAML or JSON", "error", err)
+			return nil, fmt.Errorf("failed to parse workflow DSL: %w", err)
+		}
+	}
+
+	// Extract basic information from DSL
+	var workflowID, name, description, version, specVersion, startState string
+
+	// Handle DSL 1.0.0 format
+	if document, ok := dslMap["document"].(map[string]interface{}); ok {
+		workflowID = getStringValue(document, "name")
+		name = getStringValue(document, "name")
+		description = getStringValue(document, "description")
+		version = getStringValue(document, "version")
+		specVersion = getStringValue(document, "dsl")
+		startState = "start" // DSL 1.0.0 doesn't have explicit start state
+	} else {
+		// Handle DSL 0.8 format
+		workflowID = getStringValue(dslMap, "id")
+		name = getStringValue(dslMap, "name")
+		description = getStringValue(dslMap, "description")
+		version = getStringValue(dslMap, "version")
+		specVersion = getStringValue(dslMap, "specVersion")
+		startState = getStringValue(dslMap, "start")
+	}
+
+	// Create workflow definition
+	definition := &gen.WorkflowDefinition{
+		Id:          workflowID,
+		Name:        name,
+		Description: description,
+		Version:     version,
+		SpecVersion: specVersion,
+		StartState:  startState,
+	}
+
+	// Store the complete DSL definition
+	definition.DslDefinition, _ = structpb.NewStruct(dslMap)
+
+	e.logger.Info("Successfully parsed workflow definition",
+		"workflow_id", definition.Id,
+		"name", definition.Name,
+		"version", definition.Version,
+		"spec_version", definition.SpecVersion)
+
+	return definition, nil
+}
+
+// getStringValue safely extracts a string value from a map
+func getStringValue(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+// ValidateDefinition validates a workflow definition
+// For now, this is a basic validation - can be enhanced later
+func (e *ServerlessWorkflowEngine) ValidateDefinition(ctx context.Context, definition *gen.WorkflowDefinition) error {
+	// Basic validation
+	if definition.Id == "" {
+		return fmt.Errorf("workflow ID is required")
+	}
+	if definition.Name == "" {
+		return fmt.Errorf("workflow name is required")
+	}
+	if definition.DslDefinition == nil {
+		return fmt.Errorf("workflow DSL definition is required")
+	}
+
+	e.logger.Debug("Workflow validation passed", "workflow_id", definition.Id)
+	return nil
+}
+
+// InitializeState creates initial workflow state from definition
+func (e *ServerlessWorkflowEngine) InitializeState(ctx context.Context, definition *gen.WorkflowDefinition, input map[string]interface{}) (*gen.WorkflowState, error) {
+	now := timestamppb.Now()
+
+	// Convert input to protobuf struct
+	inputStruct, err := structpb.NewStruct(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert input to protobuf struct: %w", err)
+	}
+
+	// Initialize variables with input data
+	variables := make(map[string]interface{})
+	for k, v := range input {
+		variables[k] = v
+	}
+	variablesStruct, _ := structpb.NewStruct(variables)
+
+	state := &gen.WorkflowState{
+		WorkflowId:     definition.Id,
+		CurrentStep:    definition.StartState,
+		Status:         gen.WorkflowStatus_WORKFLOW_STATUS_CREATED,
+		Variables:      variablesStruct,
+		Input:          inputStruct,
+		CompletedTasks: []*gen.CompletedTask{},
+		PendingTasks:   []*gen.PendingTask{},
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	e.logger.Info("Initialized workflow state",
+		"workflow_id", definition.Id,
+		"start_state", definition.StartState)
+
+	return state, nil
+}
+
+// RebuildState rebuilds workflow state from event history using the SDK
+func (e *ServerlessWorkflowEngine) RebuildState(ctx context.Context, definition *gen.WorkflowDefinition, events []*cloudevents.CloudEvent) (*gen.WorkflowState, error) {
+	e.logger.Info("Rebuilding workflow state from events",
+		"workflow_id", definition.Id,
+		"event_count", len(events))
+
+	// Start with empty state
+	state := &gen.WorkflowState{
+		WorkflowId:     definition.Id,
+		Status:         gen.WorkflowStatus_WORKFLOW_STATUS_CREATED,
+		CompletedTasks: []*gen.CompletedTask{},
+		PendingTasks:   []*gen.PendingTask{},
+	}
+
+	// Process each event in chronological order
+	for i, event := range events {
+		if err := e.ProcessEvent(ctx, state, event); err != nil {
+			e.logger.Error("Failed to process event during state rebuild",
+				"event_index", i,
+				"event_id", event.ID,
+				"event_type", event.Type,
+				"error", err)
+			return nil, fmt.Errorf("failed to process event %s: %w", event.ID, err)
+		}
+	}
+
+	e.logger.Info("Successfully rebuilt workflow state",
+		"workflow_id", definition.Id,
+		"final_status", state.Status,
+		"current_step", state.CurrentStep,
+		"completed_tasks", len(state.CompletedTasks))
+
+	return state, nil
+}
+
+// ProcessEvent processes a single event and updates workflow state
+func (e *ServerlessWorkflowEngine) ProcessEvent(ctx context.Context, state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	e.logger.Debug("Processing event",
+		"event_id", event.ID,
+		"event_type", event.Type,
+		"workflow_id", state.WorkflowId)
+
+	switch event.Type {
+	case "io.flunq.workflow.created":
+		return e.processWorkflowCreatedEvent(state, event)
+	case "io.flunq.execution.started":
+		return e.processExecutionStartedEvent(state, event)
+	case "io.flunq.task.requested":
+		return e.processTaskRequestedEvent(state, event)
+	case "io.flunq.task.completed":
+		return e.processTaskCompletedEvent(state, event)
+	case "io.flunq.workflow.step.completed":
+		return e.processStepCompletedEvent(state, event)
+	case "io.flunq.workflow.completed":
+		return e.processWorkflowCompletedEvent(state, event)
+	case "io.flunq.workflow.failed":
+		return e.processWorkflowFailedEvent(state, event)
+	default:
+		e.logger.Warn("Unknown event type", "event_type", event.Type, "event_id", event.ID)
+		return nil // Don't fail on unknown events
+	}
+}
+
+// processWorkflowCreatedEvent processes workflow creation events
+func (e *ServerlessWorkflowEngine) processWorkflowCreatedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_CREATED
+	state.CreatedAt = timestamppb.New(event.Time)
+	state.UpdatedAt = timestamppb.New(event.Time)
+
+	// Extract workflow data from event
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		if name, exists := eventData["name"]; exists {
+			if nameStr, ok := name.(string); ok {
+				// Store workflow name in variables
+				if state.Variables == nil {
+					state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+				}
+				state.Variables.Fields["workflow_name"] = structpb.NewStringValue(nameStr)
+			}
+		}
+	}
+
+	e.logger.Debug("Processed workflow created event", "workflow_id", state.WorkflowId)
+	return nil
+}
+
+// processExecutionStartedEvent processes execution started events
+func (e *ServerlessWorkflowEngine) processExecutionStartedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_RUNNING
+
+	// Extract execution context
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		context := &gen.ExecutionContext{
+			ExecutionId: event.ExecutionID,
+		}
+
+		if correlationId, exists := eventData["correlation_id"]; exists {
+			if corrId, ok := correlationId.(string); ok {
+				context.CorrelationId = corrId
+			}
+		}
+
+		if trigger, exists := eventData["started_by"]; exists {
+			if triggerStr, ok := trigger.(string); ok {
+				context.Trigger = triggerStr
+			}
+		}
+
+		state.Context = context
+
+		// Extract input data
+		if input, exists := eventData["input"]; exists {
+			if inputMap, ok := input.(map[string]interface{}); ok {
+				inputStruct, _ := structpb.NewStruct(inputMap)
+				state.Input = inputStruct
+
+				// Initialize variables with input
+				if state.Variables == nil {
+					state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+				}
+				for k, v := range inputMap {
+					val, _ := structpb.NewValue(v)
+					state.Variables.Fields[k] = val
+				}
+			}
+		}
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Debug("Processed execution started event", "workflow_id", state.WorkflowId, "execution_id", event.ExecutionID)
+	return nil
+}
+
+// processTaskRequestedEvent processes task requested events
+func (e *ServerlessWorkflowEngine) processTaskRequestedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		taskName, _ := eventData["task_name"].(string)
+		taskType, _ := eventData["task_type"].(string)
+		queue, _ := eventData["queue"].(string)
+		activityName, _ := eventData["activity_name"].(string)
+
+		// Create pending task
+		pendingTask := &gen.PendingTask{
+			Name:         taskName,
+			TaskType:     taskType,
+			Queue:        queue,
+			ActivityName: activityName,
+			CreatedAt:    timestamppb.New(event.Time),
+		}
+
+		// Extract input data
+		if input, exists := eventData["input"]; exists {
+			if inputMap, ok := input.(map[string]interface{}); ok {
+				pendingTask.Input, _ = structpb.NewStruct(inputMap)
+			}
+		}
+
+		state.PendingTasks = append(state.PendingTasks, pendingTask)
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Debug("Processed task requested event", "workflow_id", state.WorkflowId, "event_id", event.ID)
+	return nil
+}
+
+// processTaskCompletedEvent processes task completed events
+func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		taskName, _ := eventData["task_name"].(string)
+
+		// Remove from pending tasks
+		for i, pendingTask := range state.PendingTasks {
+			if pendingTask.Name == taskName {
+				state.PendingTasks = append(state.PendingTasks[:i], state.PendingTasks[i+1:]...)
+				break
+			}
+		}
+
+		// Create completed task
+		completedTask := &gen.CompletedTask{
+			Name: taskName,
+			Data: &gen.TaskData{
+				Metadata: &gen.TaskMetadata{
+					CompletedAt: timestamppb.New(event.Time),
+					Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+				},
+			},
+		}
+
+		// Extract task data
+		if taskData, exists := eventData["data"]; exists {
+			if dataMap, ok := taskData.(map[string]interface{}); ok {
+				if input, exists := dataMap["input"]; exists {
+					if inputMap, ok := input.(map[string]interface{}); ok {
+						completedTask.Data.Input, _ = structpb.NewStruct(inputMap)
+					}
+				}
+				if output, exists := dataMap["output"]; exists {
+					if outputMap, ok := output.(map[string]interface{}); ok {
+						completedTask.Data.Output, _ = structpb.NewStruct(outputMap)
+
+						// Update workflow variables with task output
+						if state.Variables == nil {
+							state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+						}
+						for k, v := range outputMap {
+							val, _ := structpb.NewValue(v)
+							state.Variables.Fields[k] = val
+						}
+					}
+				}
+			}
+		}
+
+		state.CompletedTasks = append(state.CompletedTasks, completedTask)
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Debug("Processed task completed event", "workflow_id", state.WorkflowId, "event_id", event.ID)
+	return nil
+}
+
+// processStepCompletedEvent processes workflow step completed events
+func (e *ServerlessWorkflowEngine) processStepCompletedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		if stepName, exists := eventData["step_name"]; exists {
+			if stepStr, ok := stepName.(string); ok {
+				state.CurrentStep = stepStr
+			}
+		}
+
+		// Update variables with step results
+		if result, exists := eventData["result"]; exists {
+			if state.Variables == nil {
+				state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+			}
+			val, _ := structpb.NewValue(result)
+			state.Variables.Fields["last_step_result"] = val
+		}
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Debug("Processed step completed event", "workflow_id", state.WorkflowId, "current_step", state.CurrentStep)
+	return nil
+}
+
+// processWorkflowCompletedEvent processes workflow completion events
+func (e *ServerlessWorkflowEngine) processWorkflowCompletedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED
+
+	// Extract output data
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		if output, exists := eventData["output"]; exists {
+			if outputMap, ok := output.(map[string]interface{}); ok {
+				state.Output, _ = structpb.NewStruct(outputMap)
+			}
+		}
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Info("Processed workflow completed event", "workflow_id", state.WorkflowId)
+	return nil
+}
+
+// processWorkflowFailedEvent processes workflow failure events
+func (e *ServerlessWorkflowEngine) processWorkflowFailedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_FAILED
+
+	// Store error information in variables
+	if eventData, ok := event.Data.(map[string]interface{}); ok {
+		if state.Variables == nil {
+			state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+		}
+
+		if errorMsg, exists := eventData["error"]; exists {
+			val, _ := structpb.NewValue(errorMsg)
+			state.Variables.Fields["error_message"] = val
+		}
+		if errorCode, exists := eventData["error_code"]; exists {
+			val, _ := structpb.NewValue(errorCode)
+			state.Variables.Fields["error_code"] = val
+		}
+	}
+
+	state.UpdatedAt = timestamppb.New(event.Time)
+	e.logger.Error("Processed workflow failed event", "workflow_id", state.WorkflowId)
+	return nil
+}
+
+// GetNextTask determines the next task to execute based on current state using SDK
+func (e *ServerlessWorkflowEngine) GetNextTask(ctx context.Context, state *gen.WorkflowState, definition *gen.WorkflowDefinition) (*gen.PendingTask, error) {
+	// For now, return a simple inject task for the current step
+	// TODO: Implement full SDK integration for determining next tasks
+
+	if state.CurrentStep == "" {
+		state.CurrentStep = definition.StartState
+	}
+
+	// Create a simple task based on current step
+	task := &gen.PendingTask{
+		Name:      fmt.Sprintf("%s_task", state.CurrentStep),
+		TaskType:  "set", // Default to set task for now
+		Queue:     "local-queue",
+		CreatedAt: timestamppb.Now(),
+	}
+
+	// Build simple task input
+	taskInput := make(map[string]interface{})
+	taskInput["step_name"] = state.CurrentStep
+	taskInput["inject_data"] = map[string]interface{}{
+		"step_completed": state.CurrentStep,
+		"timestamp":      time.Now().Format(time.RFC3339),
+	}
+
+	task.Input, _ = structpb.NewStruct(taskInput)
+
+	e.logger.Debug("Generated next task",
+		"state_name", state.CurrentStep,
+		"task_name", task.Name,
+		"task_type", task.TaskType)
+
+	return task, nil
+}
+
+// TODO: Implement full Serverless Workflow SDK integration
+// For now, these are placeholder implementations
+
+// ExecuteTask executes a specific task type
+func (e *ServerlessWorkflowEngine) ExecuteTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) (*gen.TaskData, error) {
+	e.logger.Info("Executing task", "task_name", task.Name, "task_type", task.TaskType)
+
+	switch task.TaskType {
+	case "set":
+		return e.executeSetTask(ctx, task, state)
+	case "wait":
+		return e.executeWaitTask(ctx, task, state)
+	case "call":
+		// For call tasks, we need to delegate to external executor
+		return nil, fmt.Errorf("call tasks must be executed by external executor service")
+	default:
+		return nil, fmt.Errorf("unsupported task type: %s", task.TaskType)
+	}
+}
+
+// executeSetTask executes a set variables task
+func (e *ServerlessWorkflowEngine) executeSetTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) (*gen.TaskData, error) {
+	startTime := time.Now()
+
+	// Extract data to inject
+	taskInput := task.Input.AsMap()
+	injectData, exists := taskInput["inject_data"]
+	if !exists {
+		return nil, fmt.Errorf("no inject_data found in set task input")
+	}
+
+	// Update workflow variables
+	if state.Variables == nil {
+		state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+	}
+
+	var injectMapLen int
+	if injectMap, ok := injectData.(map[string]interface{}); ok {
+		injectMapLen = len(injectMap)
+		for k, v := range injectMap {
+			val, _ := structpb.NewValue(v)
+			state.Variables.Fields[k] = val
+		}
+	}
+
+	// Create task result
+	taskData := &gen.TaskData{
+		Input:  task.Input,
+		Output: task.Input, // For set tasks, output is same as input
+		Metadata: &gen.TaskMetadata{
+			StartedAt:   timestamppb.New(startTime),
+			CompletedAt: timestamppb.Now(),
+			DurationMs:  time.Since(startTime).Milliseconds(),
+			Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+			TaskType:    task.TaskType,
+			Queue:       task.Queue,
+		},
+	}
+
+	e.logger.Debug("Executed set task", "task_name", task.Name, "variables_updated", injectMapLen)
+	return taskData, nil
+}
+
+// executeWaitTask executes a wait/sleep task
+func (e *ServerlessWorkflowEngine) executeWaitTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) (*gen.TaskData, error) {
+	startTime := time.Now()
+
+	// Extract duration
+	taskInput := task.Input.AsMap()
+	durationStr, exists := taskInput["duration"].(string)
+	if !exists {
+		return nil, fmt.Errorf("no duration found in wait task input")
+	}
+
+	// Parse duration
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration format: %w", err)
+	}
+
+	// Sleep for the specified duration
+	e.logger.Debug("Sleeping for duration", "task_name", task.Name, "duration", duration)
+	time.Sleep(duration)
+
+	// Create task result
+	taskData := &gen.TaskData{
+		Input: task.Input,
+		Output: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"slept_duration": structpb.NewStringValue(duration.String()),
+			},
+		},
+		Metadata: &gen.TaskMetadata{
+			StartedAt:   timestamppb.New(startTime),
+			CompletedAt: timestamppb.Now(),
+			DurationMs:  time.Since(startTime).Milliseconds(),
+			Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+			TaskType:    task.TaskType,
+			Queue:       task.Queue,
+		},
+	}
+
+	e.logger.Debug("Executed wait task", "task_name", task.Name, "duration", duration)
+	return taskData, nil
+}
+
+// IsWorkflowComplete checks if the workflow has completed
+func (e *ServerlessWorkflowEngine) IsWorkflowComplete(ctx context.Context, state *gen.WorkflowState, definition *gen.WorkflowDefinition) bool {
+	// Workflow is complete if status is completed or failed
+	if state.Status == gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED ||
+		state.Status == gen.WorkflowStatus_WORKFLOW_STATUS_FAILED {
+		return true
+	}
+
+	// Check if current state is an end state
+	dslMap := definition.DslDefinition.AsMap()
+	if states, exists := dslMap["states"]; exists {
+		if statesArray, ok := states.([]interface{}); ok {
+			for _, stateInterface := range statesArray {
+				if stateMap, ok := stateInterface.(map[string]interface{}); ok {
+					if name, exists := stateMap["name"]; exists && name == state.CurrentStep {
+						if end, exists := stateMap["end"]; exists {
+							if endBool, ok := end.(bool); ok && endBool {
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
