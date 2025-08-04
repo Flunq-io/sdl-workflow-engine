@@ -155,9 +155,15 @@ func (s *RedisEventStreamSubscription) readFromStream(ctx context.Context) {
 	// Discover workflow streams dynamically
 	workflowStreams, err := s.discoverWorkflowStreams(ctx)
 	if err != nil || len(workflowStreams) == 0 {
+		s.logger.Info("DEBUG: No workflow streams found, sleeping")
 		time.Sleep(1 * time.Second)
 		return
 	}
+
+	s.logger.Info("DEBUG: Discovered workflow streams", "streams", workflowStreams, "count", len(workflowStreams))
+
+	// Ensure consumer groups exist for all discovered streams
+	s.ensureConsumerGroups(ctx)
 
 	// Build streams array with proper stream:id pairs
 	// Format: [stream1, ">", stream2, ">", ...] to read unprocessed messages
@@ -176,14 +182,24 @@ func (s *RedisEventStreamSubscription) readFromStream(ctx context.Context) {
 
 	if err != nil {
 		if err != redis.Nil && !isNoGroupError(err) && !isInvalidStreamIDError(err) {
+			s.logger.Error("Redis Stream read error", "error", err)
 			s.errorsCh <- fmt.Errorf("failed to read from Redis Stream: %w", err)
+		} else {
+			s.logger.Info("DEBUG: Redis Stream read returned nil, sleeping")
 		}
+		time.Sleep(100 * time.Millisecond)
 		return
 	}
 
+	s.logger.Info("DEBUG: Redis Stream read successful", "stream_count", len(streams))
+
 	// Process messages
+	messageCount := 0
 	for _, stream := range streams {
+		s.logger.Info("DEBUG: Processing stream", "stream", stream.Stream, "message_count", len(stream.Messages))
+		messageCount += len(stream.Messages)
 		for _, message := range stream.Messages {
+			s.logger.Info("DEBUG: Processing message", "message_id", message.ID)
 			event, err := s.parseMessage(message)
 			if err != nil {
 				s.logger.Error("Failed to parse Redis Stream message",
@@ -192,10 +208,14 @@ func (s *RedisEventStreamSubscription) readFromStream(ctx context.Context) {
 				continue
 			}
 
+			s.logger.Info("DEBUG: Parsed event", "event_id", event.ID, "event_type", event.Type)
+
 			// Apply filters
 			if s.shouldProcessEvent(event) {
+				s.logger.Info("Sending event to channel", "event_id", event.ID, "event_type", event.Type)
 				select {
 				case s.eventsCh <- event:
+					s.logger.Info("DEBUG: Event sent successfully", "event_id", event.ID)
 					// Acknowledge the message using the correct stream name
 					s.client.XAck(ctx, stream.Stream, s.consumerGroup, message.ID)
 				case <-ctx.Done():
@@ -204,26 +224,63 @@ func (s *RedisEventStreamSubscription) readFromStream(ctx context.Context) {
 					return
 				}
 			} else {
+				s.logger.Info("DEBUG: Event filtered out", "event_id", event.ID, "event_type", event.Type)
 				// Acknowledge filtered messages using the correct stream name
 				s.client.XAck(ctx, stream.Stream, s.consumerGroup, message.ID)
 			}
 		}
 	}
+
+	// If no messages were processed, sleep to avoid busy-wait
+	if messageCount == 0 {
+		s.logger.Info("DEBUG: No messages processed, sleeping")
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // parseMessage converts Redis Stream message to CloudEvent
 func (s *RedisEventStreamSubscription) parseMessage(message redis.XMessage) (*cloudevents.CloudEvent, error) {
-	eventDataStr, ok := message.Values["data"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid event data")
+	event := &cloudevents.CloudEvent{}
+
+	// Extract basic fields from Redis message values
+	if eventID, ok := message.Values["event_id"].(string); ok {
+		event.ID = eventID
+	}
+	if eventType, ok := message.Values["event_type"].(string); ok {
+		event.Type = eventType
+	}
+	if source, ok := message.Values["source"].(string); ok {
+		event.Source = source
+	}
+	if workflowID, ok := message.Values["workflow_id"].(string); ok {
+		event.WorkflowID = workflowID
+	}
+	if executionID, ok := message.Values["execution_id"].(string); ok {
+		event.ExecutionID = executionID
+	}
+	if taskID, ok := message.Values["task_id"].(string); ok {
+		event.TaskID = taskID
+	}
+	if specVersion, ok := message.Values["spec_version"].(string); ok {
+		event.SpecVersion = specVersion
 	}
 
-	var event cloudevents.CloudEvent
-	if err := json.Unmarshal([]byte(eventDataStr), &event); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal event data: %w", err)
+	// Parse timestamp
+	if timestamp, ok := message.Values["timestamp"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, timestamp); err == nil {
+			event.Time = t
+		}
 	}
 
-	return &event, nil
+	// Parse data payload
+	if dataStr, ok := message.Values["data"].(string); ok {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(dataStr), &data); err == nil {
+			event.Data = data
+		}
+	}
+
+	return event, nil
 }
 
 // shouldProcessEvent checks if event matches filters
@@ -288,6 +345,14 @@ func (s *RedisEventStreamSubscription) ensureConsumerGroups(ctx context.Context)
 				"stream", streamKey,
 				"group", s.consumerGroup,
 				"error", err)
+		} else if err == nil {
+			// Consumer group was just created, set it to read from the beginning
+			err = s.client.XGroupSetID(ctx, streamKey, s.consumerGroup, "0").Err()
+			if err != nil {
+				s.logger.Warn("Failed to reset consumer group position", "stream", streamKey, "group", s.consumerGroup, "error", err)
+			} else {
+				s.logger.Info("Created and reset consumer group", "stream", streamKey, "group", s.consumerGroup)
+			}
 		}
 	}
 }
@@ -298,6 +363,8 @@ func (s *RedisEventStreamSubscription) discoverWorkflowStreams(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover workflow streams: %w", err)
 	}
+
+	s.logger.Info("DEBUG: Discovered workflow streams", "streams", keys, "count", len(keys))
 
 	// Ensure consumer groups exist for discovered streams
 	for _, streamKey := range keys {

@@ -189,6 +189,11 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		"event_type", event.Type,
 		"workflow_id", event.WorkflowID)
 
+	// DEBUG: Print event data structure
+	p.logger.Info("DEBUG: Event data",
+		"data_type", fmt.Sprintf("%T", event.Data),
+		"data_value", event.Data)
+
 	// Get workflow-specific lock to prevent concurrent processing of same workflow
 	workflowLock := p.getWorkflowLock(event.WorkflowID)
 	workflowLock.Lock()
