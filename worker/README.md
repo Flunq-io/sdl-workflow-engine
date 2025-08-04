@@ -64,7 +64,7 @@ Environment variables:
 - `CONCURRENCY`: Number of concurrent workflows (default: 10)
 - `REDIS_URL`: Redis connection string
 - `EVENTS_URL`: Events service URL
-- `TASKS_URL`: Tasks service URL
+- `EXECUTOR_URL`: Executor service URL
 - `LOG_LEVEL`: Logging level
 
 ## 🚀 Quick Start

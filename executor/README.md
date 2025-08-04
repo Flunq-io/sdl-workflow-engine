@@ -1,6 +1,6 @@
-# Tasks Service
+# Executor Service
 
-The Tasks service handles external API calls, HTTP requests, and integrations with third-party services.
+The Executor service handles external API calls, HTTP requests, and integrations with third-party services.
 
 ## 🏗️ Architecture
 
@@ -39,7 +39,7 @@ The Tasks service handles external API calls, HTTP requests, and integrations wi
 ## 📁 Structure
 
 ```
-tasks/
+executor/
 ├── cmd/
 │   └── server/
 │       └── main.go
@@ -77,28 +77,28 @@ go mod tidy
 go run cmd/server/main.go
 
 # Build
-go build -o bin/tasks cmd/server/main.go
+go build -o bin/executor cmd/server/main.go
 
 # Run with Docker
-docker build -t flunq-tasks .
-docker run -p 8083:8083 flunq-tasks
+docker build -t flunq-executor .
+docker run -p 8083:8083 flunq-executor
 ```
 
 ## 📚 API Endpoints
 
 ### Task Execution
-- `POST /api/v1/tasks/execute` - Execute HTTP task
-- `GET /api/v1/tasks/{id}` - Get task status
-- `POST /api/v1/tasks/{id}/cancel` - Cancel task
+- `POST /api/v1/execute` - Execute HTTP task
+- `GET /api/v1/executions/{id}` - Get execution status
+- `POST /api/v1/executions/{id}/cancel` - Cancel execution
 
 ### Configuration
 - `POST /api/v1/configs` - Create configuration
 - `GET /api/v1/configs` - List configurations
 - `PUT /api/v1/configs/{id}` - Update configuration
 
-## 🔧 Task Types
+## 🔧 Execution Types
 
-### HTTP Tasks
+### HTTP Executions
 ```json
 {
   "type": "http",
@@ -117,7 +117,7 @@ docker run -p 8083:8083 flunq-tasks
 }
 ```
 
-### GraphQL Tasks
+### GraphQL Executions
 ```json
 {
   "type": "graphql",
@@ -132,7 +132,7 @@ docker run -p 8083:8083 flunq-tasks
 }
 ```
 
-### Database Tasks
+### Database Executions
 ```json
 {
   "type": "database",

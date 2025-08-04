@@ -1,39 +1,50 @@
-# Events Service
+# Event Store Service
 
-The Events service handles event streaming, storage, and distribution across the flunq.io platform.
+The Event Store service is the centralized nervous system of the flunq.io workflow engine. ALL services connect to it as subscribers/publishers for complete event-driven coordination.
 
-## 🏗️ Architecture
+## 🏗️ Architecture - Central Event Hub
 
 ```
-┌─────────────────┐
-│   Event Router  │
-│   (gRPC/HTTP)   │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Event Store    │
-│  (Redis/Kafka)  │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Stream Manager │
-│  (Pub/Sub)      │
-└─────────┬───────┘
-          │
-┌─────────▼───────┐
-│  Event Sourcing │
-│  (Snapshots)    │
-└─────────────────┘
+    API Service ──┐
+                  │
+    Worker ───────┤
+                  │     ┌─────────────────────┐
+    Executor ─────┼────►│   Event Store       │────► All Services
+                  │     │   (Central Hub)     │      (Subscribers)
+    UI Service ───┤     │                     │
+                  │     │ ┌─────────────────┐ │
+    Other ────────┘     │ │ Event Router    │ │
+    Services            │ │ WebSocket/gRPC  │ │
+                        │ └─────────────────┘ │
+                        │ ┌─────────────────┐ │
+                        │ │ Event Storage   │ │
+                        │ │ (Redis Streams) │ │
+                        │ └─────────────────┘ │
+                        │ ┌─────────────────┐ │
+                        │ │ Subscriber Mgmt │ │
+                        │ │ (Connections)   │ │
+                        │ └─────────────────┘ │
+                        └─────────────────────┘
+                                  │
+                                  ▼
+                        ┌─────────────────────┐
+                        │  Event Persistence  │
+                        │  (Durable Storage)  │
+                        └─────────────────────┘
 ```
 
-## 🚀 Features
+## 🚀 Features - Central Event Hub
 
-- **Event Streaming**: Real-time event distribution
-- **Event Sourcing**: Complete audit trail of all events
-- **Pluggable Backends**: Redis Streams, Apache Kafka, NATS
-- **Event Replay**: Replay events from any point in time
-- **Dead Letter Queue**: Handle failed event processing
-- **Schema Registry**: Event schema validation and evolution
+- **Centralized Event Store**: Single source of truth for ALL events
+- **Real-time Distribution**: WebSocket/gRPC connections to all services
+- **Subscriber Management**: Active connection tracking and routing
+- **Event Filtering**: Route events based on type, workflow ID, service rules
+- **Event Replay**: Complete event history and catch-up capabilities
+- **CloudEvents Standard**: Standardized event format and metadata
+- **Fault Tolerance**: Automatic reconnection and missed event recovery
+- **Dead Letter Queue**: Handle failed deliveries with retry logic
+- **Event Ordering**: Guaranteed event ordering per workflow
+- **Load Balancing**: Multiple service instances with smart routing
 
 ## 📁 Structure
 

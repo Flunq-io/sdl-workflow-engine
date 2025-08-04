@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package eventstore;
+
+option go_package = "github.com/flunq-io/events/proto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// EventStore service definition
+service EventStore {
+  // Publish a new event
+  rpc PublishEvent(PublishEventRequest) returns (PublishEventResponse);
+  
+  // Subscribe to events (streaming)
+  rpc Subscribe(SubscribeRequest) returns (stream EventMessage);
+  
+  // Get event history for a workflow
+  rpc GetEventHistory(GetEventHistoryRequest) returns (GetEventHistoryResponse);
+  
+  // Get events since a specific version
+  rpc GetEventsSince(GetEventsSinceRequest) returns (GetEventsSinceResponse);
+}
+
+// CloudEvent message
+message CloudEvent {
+  string id = 1;
+  string source = 2;
+  string spec_version = 3;
+  string type = 4;
+  string data_content_type = 5;
+  string data_schema = 6;
+  string subject = 7;
+  google.protobuf.Timestamp time = 8;
+  google.protobuf.Any data = 9;
+  
+  // Flunq.io specific fields
+  string workflow_id = 10;
+  string execution_id = 11;
+  string task_id = 12;
+  string correlation_id = 13;
+  
+  // Extension attributes
+  map<string, string> extensions = 14;
+}
+
+// Publish event request
+message PublishEventRequest {
+  CloudEvent event = 1;
+}
+
+// Publish event response
+message PublishEventResponse {
+  string event_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+// Subscribe request
+message SubscribeRequest {
+  string service_name = 1;
+  repeated string event_types = 2;
+  repeated string workflow_ids = 3;
+  map<string, string> filters = 4;
+}
+
+// Event message for streaming
+message EventMessage {
+  CloudEvent event = 1;
+  google.protobuf.Timestamp received_at = 2;
+}
+
+// Get event history request
+message GetEventHistoryRequest {
+  string workflow_id = 1;
+}
+
+// Get event history response
+message GetEventHistoryResponse {
+  string workflow_id = 1;
+  repeated CloudEvent events = 2;
+}
+
+// Get events since request
+message GetEventsSinceRequest {
+  string workflow_id = 1;
+  string since = 2;
+}
+
+// Get events since response
+message GetEventsSinceResponse {
+  string workflow_id = 1;
+  string since = 2;
+  repeated CloudEvent events = 3;
+}

@@ -1,4 +1,4 @@
-module github.com/flunq-io/tasks
+module github.com/flunq-io/executor
 
 go 1.21
 

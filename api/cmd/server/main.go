@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,8 +14,9 @@ import (
 
 	"github.com/flunq-io/api/internal/handlers"
 	"github.com/flunq-io/api/internal/middleware"
+	"github.com/flunq-io/api/internal/repository"
 	"github.com/flunq-io/api/internal/services"
-	"github.com/flunq-io/api/pkg/events"
+	"github.com/flunq-io/events/pkg/client"
 )
 
 func main() {
@@ -38,20 +37,26 @@ func main() {
 		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Initialize event client
-	eventClient := events.NewRedisClient(redisClient)
+	// Initialize Event Store client
+	eventStoreURL := getEnv("EVENTS_URL", "http://localhost:8081")
+	eventClient := client.NewEventClient(eventStoreURL, "api-service", logger)
+
+	// Initialize repositories
+	workflowRepo := repository.NewMemoryWorkflowRepository()
+	executionRepo := repository.NewMemoryExecutionRepository()
 
 	// Initialize services
-	workflowService := services.NewWorkflowService(eventClient, logger)
-	executionService := services.NewExecutionService(eventClient, logger)
+	workflowService := services.NewWorkflowService(workflowRepo, executionRepo, eventClient, logger)
+	executionService := services.NewExecutionService(executionRepo, eventClient, logger)
 
 	// Initialize handlers
 	workflowHandler := handlers.NewWorkflowHandler(workflowService, logger)
 	executionHandler := handlers.NewExecutionHandler(executionService, logger)
 	healthHandler := handlers.NewHealthHandler(redisClient, logger)
+	docsHandler := handlers.NewDocsHandler()
 
 	// Setup router
-	router := setupRouter(workflowHandler, executionHandler, healthHandler)
+	router := setupRouter(workflowHandler, executionHandler, healthHandler, docsHandler)
 
 	// Start server
 	port := getEnv("PORT", "8080")
@@ -90,6 +95,7 @@ func setupRouter(
 	workflowHandler *handlers.WorkflowHandler,
 	executionHandler *handlers.ExecutionHandler,
 	healthHandler *handlers.HealthHandler,
+	docsHandler *handlers.DocsHandler,
 ) *gin.Engine {
 	router := gin.New()
 
@@ -115,6 +121,7 @@ func setupRouter(
 			workflows.PUT("/:id", workflowHandler.Update)
 			workflows.DELETE("/:id", workflowHandler.Delete)
 			workflows.POST("/:id/execute", workflowHandler.Execute)
+			workflows.GET("/:id/events", workflowHandler.GetEvents)
 		}
 
 		// Execution routes
@@ -124,7 +131,17 @@ func setupRouter(
 			executions.GET("/:id", executionHandler.Get)
 			executions.POST("/:id/cancel", executionHandler.Cancel)
 		}
+
+		// Documentation routes
+		docs := v1.Group("/docs")
+		{
+			docs.GET("/openapi.yaml", docsHandler.OpenAPISpec)
+		}
 	}
+
+	// Swagger UI (outside of /api/v1)
+	router.GET("/docs", docsHandler.SwaggerUI)
+	router.GET("/docs/", docsHandler.SwaggerUI)
 
 	return router
 }

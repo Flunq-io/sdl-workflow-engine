@@ -5,16 +5,22 @@ A modern Temporal.io replacement built on top of the Serverless Workflow Definit
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│       UI        │    │       API       │    │     Events      │
-│   (Next.js)     │◄──►│      (Go)       │◄──►│      (Go)       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │     Worker      │    │     Tasks       │
-                       │      (Go)       │◄──►│      (Go)       │
-                       └─────────────────┘    └─────────────────┘
+    API Service ──┐
+                  │
+    Worker ───────┤
+                  │     ┌─────────────────────┐
+    Executor ─────┼────►│   Event Store       │────► All Services
+                  │     │   (Central Hub)     │      (Subscribers)
+    UI Service ───┤     │                     │
+                  │     │ ┌─────────────────┐ │
+    Other ────────┘     │ │ Event Router    │ │
+    Services            │ │ WebSocket/gRPC  │ │
+                        │ └─────────────────┘ │
+                        │ ┌─────────────────┐ │
+                        │ │ Event Storage   │ │
+                        │ │ (Redis Streams) │ │
+                        │ └─────────────────┘ │
+                        └─────────────────────┘
 ```
 
 ## 🚀 Services
@@ -24,19 +30,19 @@ A modern Temporal.io replacement built on top of the Serverless Workflow Definit
 - **Purpose**: HTTP API server, DSL parsing, workflow orchestration
 - **Features**: REST/GraphQL endpoints, workflow validation, execution control
 
-### **Events Service** (`/events`) 
+### **Event Store Service** (`/events`)
 - **Language**: Go
-- **Purpose**: Event streaming and storage
-- **Features**: Pluggable backends (Redis, Kafka, NATS), event sourcing
+- **Purpose**: Centralized event hub - the nervous system of the workflow engine
+- **Features**: CloudEvents storage, real-time distribution, subscriber management, event replay
 
 ### **Worker Service** (`/worker`)
 - **Language**: Go  
 - **Purpose**: Workflow execution engine
 - **Features**: DSL interpretation, state management, task scheduling
 
-### **Tasks Service** (`/tasks`)
+### **Executor Service** (`/executor`)
 - **Language**: Go
-- **Purpose**: External API integration
+- **Purpose**: External API integration and task execution
 - **Features**: HTTP calls, retries, circuit breakers, rate limiting
 
 ### **UI Service** (`/ui`)
@@ -65,9 +71,9 @@ docker-compose up -d
 
 # Or start individual services
 cd api && go run main.go
-cd events && go run main.go  
+cd events && go run main.go
 cd worker && go run main.go
-cd tasks && go run main.go
+cd executor && go run main.go
 cd ui && npm run dev
 ```
 

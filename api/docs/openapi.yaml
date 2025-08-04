@@ -1,0 +1,782 @@
+openapi: 3.0.3
+info:
+  title: Flunq.io Workflow API
+  description: |
+    REST API for the Flunq.io serverless workflow engine.
+    
+    This API provides endpoints for managing workflows, executions, and monitoring workflow state.
+    All workflows follow the Serverless Workflow Definition Language specification.
+  version: 1.0.0
+  contact:
+    name: Flunq.io API Support
+    url: https://github.com/flunq-io/flunq.io
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+  - url: https://api.flunq.io/v1
+    description: Production server
+
+paths:
+  /workflows:
+    post:
+      summary: Create a new workflow
+      description: Creates a new workflow from a Serverless Workflow Definition Language specification
+      operationId: createWorkflow
+      tags:
+        - Workflows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRequest'
+            examples:
+              user-onboarding:
+                summary: User onboarding workflow
+                value:
+                  name: "user-onboarding"
+                  description: "Complete user onboarding process"
+                  definition:
+                    id: "user-onboarding"
+                    version: "0.8"
+                    specVersion: "0.8"
+                    name: "User Onboarding Workflow"
+                    start: "validate-user-data"
+                    states:
+                      - name: "validate-user-data"
+                        type: "operation"
+                        actions:
+                          - name: "validate-email"
+                            functionRef:
+                              refName: "validate-email"
+                        transition: "create-account"
+                        end: true
+      responses:
+        '201':
+          description: Workflow created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+              examples:
+                created:
+                  value:
+                    id: "wf_01234567890abcdef"
+                    name: "user-onboarding"
+                    status: "created"
+                    created_at: "2024-01-01T12:00:00Z"
+                    updated_at: "2024-01-01T12:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: List workflows
+      description: Retrieve a list of workflows with optional filtering
+      operationId: listWorkflows
+      tags:
+        - Workflows
+      parameters:
+        - name: status
+          in: query
+          description: Filter workflows by status
+          schema:
+            type: string
+            enum: [created, running, completed, failed, cancelled]
+        - name: limit
+          in: query
+          description: Maximum number of workflows to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of workflows to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of workflows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflows/{workflowId}:
+    get:
+      summary: Get workflow details
+      description: Retrieve detailed information about a specific workflow
+      operationId: getWorkflow
+      tags:
+        - Workflows
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique identifier of the workflow
+          schema:
+            type: string
+            pattern: '^wf_[a-zA-Z0-9]{16}$'
+          example: "wf_01234567890abcdef"
+      responses:
+        '200':
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update workflow
+      description: Update an existing workflow definition
+      operationId: updateWorkflow
+      tags:
+        - Workflows
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique identifier of the workflow
+          schema:
+            type: string
+            pattern: '^wf_[a-zA-Z0-9]{16}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkflowRequest'
+      responses:
+        '200':
+          description: Workflow updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Delete workflow
+      description: Delete a workflow (only if not running)
+      operationId: deleteWorkflow
+      tags:
+        - Workflows
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique identifier of the workflow
+          schema:
+            type: string
+            pattern: '^wf_[a-zA-Z0-9]{16}$'
+      responses:
+        '204':
+          description: Workflow deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflows/{workflowId}/execute:
+    post:
+      summary: Execute workflow
+      description: Start execution of a workflow with input data
+      operationId: executeWorkflow
+      tags:
+        - Executions
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique identifier of the workflow
+          schema:
+            type: string
+            pattern: '^wf_[a-zA-Z0-9]{16}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+            examples:
+              user-data:
+                summary: User onboarding execution
+                value:
+                  input:
+                    user:
+                      email: "user@example.com"
+                      name: "John Doe"
+                      plan: "premium"
+                  correlation_id: "req_123456789"
+      responses:
+        '202':
+          description: Workflow execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflows/{workflowId}/events:
+    get:
+      summary: Get workflow event history
+      description: Retrieve the complete event history for a workflow
+      operationId: getWorkflowEvents
+      tags:
+        - Events
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          description: Unique identifier of the workflow
+          schema:
+            type: string
+            pattern: '^wf_[a-zA-Z0-9]{16}$'
+        - name: since
+          in: query
+          description: Return events since this event ID
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of events to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: Workflow event history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventHistoryResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /executions:
+    get:
+      summary: List executions
+      description: Retrieve a list of workflow executions
+      operationId: listExecutions
+      tags:
+        - Executions
+      parameters:
+        - name: workflow_id
+          in: query
+          description: Filter executions by workflow ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter executions by status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: limit
+          in: query
+          description: Maximum number of executions to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of executions to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of executions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /executions/{executionId}:
+    get:
+      summary: Get execution details
+      description: Retrieve detailed information about a specific execution
+      operationId: getExecution
+      tags:
+        - Executions
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          description: Unique identifier of the execution
+          schema:
+            type: string
+            pattern: '^ex_[a-zA-Z0-9]{16}$'
+      responses:
+        '200':
+          description: Execution details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      summary: Cancel execution
+      description: Cancel a running workflow execution
+      operationId: cancelExecution
+      tags:
+        - Executions
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          description: Unique identifier of the execution
+          schema:
+            type: string
+            pattern: '^ex_[a-zA-Z0-9]{16}$'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Reason for cancellation
+                  example: "User requested cancellation"
+      responses:
+        '200':
+          description: Execution cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      summary: Health check
+      description: Check the health status of the API service
+      operationId: healthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    CreateWorkflowRequest:
+      type: object
+      required:
+        - name
+        - definition
+      properties:
+        name:
+          type: string
+          description: Human-readable name for the workflow
+          example: "user-onboarding"
+        description:
+          type: string
+          description: Description of what the workflow does
+          example: "Complete user onboarding process with email verification"
+        definition:
+          type: object
+          description: Serverless Workflow Definition Language specification
+          additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags for categorizing workflows
+          example: ["onboarding", "user-management"]
+
+    UpdateWorkflowRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable name for the workflow
+        description:
+          type: string
+          description: Description of what the workflow does
+        definition:
+          type: object
+          description: Serverless Workflow Definition Language specification
+          additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags for categorizing workflows
+
+    WorkflowResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the workflow
+          example: "wf_01234567890abcdef"
+        name:
+          type: string
+          description: Human-readable name for the workflow
+          example: "user-onboarding"
+        description:
+          type: string
+          description: Description of what the workflow does
+        status:
+          type: string
+          enum: [created, active, inactive]
+          description: Current status of the workflow
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags for categorizing workflows
+        created_at:
+          type: string
+          format: date-time
+          description: When the workflow was created
+        updated_at:
+          type: string
+          format: date-time
+          description: When the workflow was last updated
+
+    WorkflowDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/WorkflowResponse'
+        - type: object
+          properties:
+            definition:
+              type: object
+              description: Complete workflow definition
+              additionalProperties: true
+            execution_count:
+              type: integer
+              description: Total number of executions
+            last_execution:
+              type: string
+              format: date-time
+              description: When the workflow was last executed
+
+    WorkflowListResponse:
+      type: object
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowResponse'
+        total:
+          type: integer
+          description: Total number of workflows
+        limit:
+          type: integer
+          description: Maximum number of workflows returned
+        offset:
+          type: integer
+          description: Number of workflows skipped
+
+    ExecuteWorkflowRequest:
+      type: object
+      properties:
+        input:
+          type: object
+          description: Input data for the workflow execution
+          additionalProperties: true
+        correlation_id:
+          type: string
+          description: Optional correlation ID for tracking
+          example: "req_123456789"
+
+    ExecutionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the execution
+          example: "ex_01234567890abcdef"
+        workflow_id:
+          type: string
+          description: ID of the workflow being executed
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+          description: Current status of the execution
+        correlation_id:
+          type: string
+          description: Correlation ID for tracking
+        started_at:
+          type: string
+          format: date-time
+          description: When the execution started
+        completed_at:
+          type: string
+          format: date-time
+          description: When the execution completed (if applicable)
+
+    ExecutionDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/ExecutionResponse'
+        - type: object
+          properties:
+            input:
+              type: object
+              description: Input data provided to the execution
+              additionalProperties: true
+            output:
+              type: object
+              description: Output data from the execution (if completed)
+              additionalProperties: true
+            error:
+              type: object
+              description: Error information (if failed)
+              properties:
+                message:
+                  type: string
+                code:
+                  type: string
+                details:
+                  type: object
+                  additionalProperties: true
+            current_state:
+              type: string
+              description: Current state in the workflow
+            duration_ms:
+              type: integer
+              description: Execution duration in milliseconds
+
+    ExecutionListResponse:
+      type: object
+      properties:
+        executions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionResponse'
+        total:
+          type: integer
+          description: Total number of executions
+        limit:
+          type: integer
+          description: Maximum number of executions returned
+        offset:
+          type: integer
+          description: Number of executions skipped
+
+    CloudEvent:
+      type: object
+      description: CloudEvents v1.0 specification event
+      required:
+        - id
+        - source
+        - specversion
+        - type
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the event
+        source:
+          type: string
+          description: Source of the event
+        specversion:
+          type: string
+          description: CloudEvents specification version
+          example: "1.0"
+        type:
+          type: string
+          description: Type of the event
+          example: "io.flunq.workflow.started"
+        datacontenttype:
+          type: string
+          description: Content type of the data
+          example: "application/json"
+        subject:
+          type: string
+          description: Subject of the event
+        time:
+          type: string
+          format: date-time
+          description: When the event occurred
+        data:
+          type: object
+          description: Event payload
+          additionalProperties: true
+        workflowid:
+          type: string
+          description: Workflow ID (flunq.io extension)
+        executionid:
+          type: string
+          description: Execution ID (flunq.io extension)
+
+    EventHistoryResponse:
+      type: object
+      properties:
+        workflow_id:
+          type: string
+          description: ID of the workflow
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/CloudEvent'
+        total:
+          type: integer
+          description: Total number of events
+        since:
+          type: string
+          description: Event ID used as starting point (if provided)
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Overall health status
+        timestamp:
+          type: string
+          format: date-time
+          description: When the health check was performed
+        version:
+          type: string
+          description: API version
+        dependencies:
+          type: object
+          description: Status of external dependencies
+          properties:
+            redis:
+              type: string
+              enum: [healthy, unhealthy]
+            event_store:
+              type: string
+              enum: [healthy, unhealthy]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "The request body contains invalid data"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+        request_id:
+          type: string
+          description: Unique identifier for the request
+          example: "req_01234567890abcdef"
+
+  responses:
+    BadRequest:
+      description: Bad Request - Invalid input data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validation_error:
+              value:
+                error: "VALIDATION_ERROR"
+                message: "The request body contains invalid data"
+                details:
+                  field: "name"
+                  reason: "name is required"
+
+    NotFound:
+      description: Not Found - Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            workflow_not_found:
+              value:
+                error: "WORKFLOW_NOT_FOUND"
+                message: "The specified workflow does not exist"
+
+    InternalServerError:
+      description: Internal Server Error - Something went wrong
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            internal_error:
+              value:
+                error: "INTERNAL_ERROR"
+                message: "An unexpected error occurred"
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication (to be implemented)
+
+# Global security (commented out for now)
+# security:
+#   - BearerAuth: []
+
+tags:
+  - name: Workflows
+    description: Workflow management operations
+  - name: Executions
+    description: Workflow execution operations
+  - name: Events
+    description: Event history and monitoring
+  - name: System
+    description: System health and monitoring

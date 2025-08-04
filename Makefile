@@ -18,7 +18,7 @@ help:
 	@echo "  make api       - Start only API service"
 	@echo "  make events    - Start only Events service"
 	@echo "  make worker    - Start only Worker service"
-	@echo "  make tasks     - Start only Tasks service"
+	@echo "  make executor  - Start only Executor service"
 	@echo "  make ui        - Start only UI service"
 
 # Build all services
@@ -46,8 +46,8 @@ test:
 	cd events && go test ./...
 	@echo "Running Worker tests..."
 	cd worker && go test ./...
-	@echo "Running Tasks tests..."
-	cd tasks && go test ./...
+	@echo "Running Executor tests..."
+	cd executor && go test ./...
 	@echo "Running UI tests..."
 	cd ui && npm test
 
@@ -59,8 +59,8 @@ lint:
 	cd events && go vet ./...
 	@echo "Linting Worker..."
 	cd worker && go vet ./...
-	@echo "Linting Tasks..."
-	cd tasks && go vet ./...
+	@echo "Linting Executor..."
+	cd executor && go vet ./...
 	@echo "Linting UI..."
 	cd ui && npm run lint
 
@@ -72,8 +72,8 @@ deps:
 	cd events && go mod tidy
 	@echo "Installing Worker dependencies..."
 	cd worker && go mod tidy
-	@echo "Installing Tasks dependencies..."
-	cd tasks && go mod tidy
+	@echo "Installing Executor dependencies..."
+	cd executor && go mod tidy
 	@echo "Installing UI dependencies..."
 	cd ui && npm install
 
@@ -90,9 +90,9 @@ worker:
 	docker-compose up -d redis events
 	cd worker && go run cmd/worker/main.go
 
-tasks:
+executor:
 	docker-compose up -d redis
-	cd tasks && go run cmd/server/main.go
+	cd executor && go run cmd/server/main.go
 
 ui:
 	docker-compose up -d api
@@ -117,5 +117,5 @@ monitor:
 	@echo "Service Status:"
 	@curl -s http://localhost:8080/health | jq . || echo "API: DOWN"
 	@curl -s http://localhost:8081/health | jq . || echo "Events: DOWN"
-	@curl -s http://localhost:8083/health | jq . || echo "Tasks: DOWN"
+	@curl -s http://localhost:8083/health | jq . || echo "Executor: DOWN"
 	@echo "UI: http://localhost:3000"

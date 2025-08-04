@@ -11,19 +11,19 @@ start: validate-user-data
 
 functions:
   - name: validate-email
-    operation: http://tasks:8083/api/v1/tasks/execute
+    operation: http://executor:8083/api/v1/execute
     type: rest
   - name: create-user-account
-    operation: http://tasks:8083/api/v1/tasks/execute
+    operation: http://executor:8083/api/v1/execute
     type: rest
   - name: send-welcome-email
-    operation: http://tasks:8083/api/v1/tasks/execute
+    operation: http://executor:8083/api/v1/execute
     type: rest
   - name: setup-user-profile
-    operation: http://tasks:8083/api/v1/tasks/execute
+    operation: http://executor:8083/api/v1/execute
     type: rest
   - name: notify-admin
-    operation: http://tasks:8083/api/v1/tasks/execute
+    operation: http://executor:8083/api/v1/execute
     type: rest
 
 events:
