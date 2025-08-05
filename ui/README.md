@@ -5,9 +5,11 @@ Modern, minimalistic web dashboard for the Flunq.io workflow engine. Built with 
 ## ✨ Features
 
 - **Workflow Management** - View and monitor all workflows with real-time status updates
-- **Event Timeline** - Detailed event history with interactive timeline visualization
+- **Enhanced Event Timeline** - Interactive timeline with complete I/O data visualization
+- **I/O Data Display** - Collapsible workflow and task input/output data with color coding
 - **SDL Compliant** - Full support for Serverless Workflow DSL 1.0.0 status types
 - **Real-time Updates** - Automatic refresh of workflow status and events
+- **Internationalization** - Support for 6 languages (EN, FR, DE, ES, ZH, NL)
 - **Dark/Light Mode** - Beautiful theme switching with system preference detection
 - **Responsive Design** - Works perfectly on desktop, tablet, and mobile
 - **Temporal-like Interface** - Familiar, professional workflow monitoring experience
@@ -120,7 +122,8 @@ docker run -p 3000:3000 flunq-ui
 ### Executions (`/executions`)
 - List all executions
 - Filter by status/workflow
-- Execution details
+- Execution details with enhanced event timeline
+- Complete I/O data visualization
 - Logs and traces
 
 ### Settings (`/settings`)
@@ -136,6 +139,14 @@ docker run -p 3000:3000 flunq-ui
 - **Palette**: Available states/actions
 - **Properties Panel**: Configure selected elements
 - **Minimap**: Navigate large workflows
+
+### Enhanced Event Timeline
+- **I/O Data Visualization**: Color-coded input (blue) and output (green) data sections
+- **Collapsible Data Display**: Click to expand/collapse JSON data with field counts
+- **Smart Data Extraction**: Automatically detects protobuf vs legacy JSON fields
+- **Internationalization**: Translated labels for all UI elements
+- **Progressive Disclosure**: Raw event data hidden when I/O data is available
+- **Real-time Updates**: Live event streaming with automatic timeline updates
 
 ### Dashboard Widgets
 - **Metrics Cards**: Key performance indicators

@@ -18,11 +18,12 @@ Every workflow event triggers this exact sequence:
 4. **Execute Next SDL Step** - Use SDK to determine and execute next action
 5. **Update Workflow Record** - Persist state changes to database
 
-### **Event Data Storage with Protobuf**
-- 🚧 **JSON Serialization**: Currently using JSON (protobuf implementation in progress)
-- ✅ **Task Input/Output**: Complete task data serialized in events
-- ✅ **Cross-Language Compatibility**: JSON enables multi-language support
-- 🚧 **Schema Evolution**: Protobuf support planned for better efficiency
+### **Enhanced I/O Storage System**
+- ✅ **JSON Serialization**: Complete workflow and task I/O data stored as JSON
+- ✅ **Protobuf Type Safety**: Protobuf structs for in-memory type safety
+- ✅ **Complete Traceability**: All input/output data preserved for debugging
+- ✅ **UI Integration**: Real-time I/O data visualization in event timeline
+- 🚧 **Binary Protobuf**: Planned migration to binary protobuf for performance
 
 ### **Generic Interface Architecture**
 - ✅ **EventStore Interface**: Switch between Redis, Kafka, EventStore DB

@@ -24,23 +24,20 @@ func NewEventStoreAdapter(client *client.EventClient, logger *zap.Logger) interf
 	}
 }
 
-// PublishEvent publishes a new event to the Event Store
-func (a *EventStoreAdapter) PublishEvent(ctx context.Context, event *cloudevents.CloudEvent) error {
-	// Use the Event Store client to publish the event
-	err := a.client.PublishEvent(ctx, event)
+// GetEventHistory retrieves all events for a workflow via HTTP API
+func (a *EventStoreAdapter) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
+	// Use the Event Store client to get event history
+	events, err := a.client.GetEventHistory(ctx, workflowID)
 	if err != nil {
-		a.logger.Error("Failed to publish event to Event Store",
-			zap.String("event_id", event.ID),
-			zap.String("event_type", event.Type),
-			zap.String("workflow_id", event.WorkflowID),
+		a.logger.Error("Failed to get event history from Event Store",
+			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		return err
+		return nil, err
 	}
 
-	a.logger.Debug("Successfully published event to Event Store",
-		zap.String("event_id", event.ID),
-		zap.String("event_type", event.Type),
-		zap.String("workflow_id", event.WorkflowID))
+	a.logger.Debug("Retrieved event history from Event Store",
+		zap.String("workflow_id", workflowID),
+		zap.Int("event_count", len(events)))
 
-	return nil
+	return events, nil
 }

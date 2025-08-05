@@ -501,7 +501,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 	}
 
 	// Publish event
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to publish task requested event: %w", err)
 	}
 
@@ -555,7 +555,7 @@ func (p *WorkflowProcessor) publishWorkflowCompletedEvent(ctx context.Context, s
 	}
 
 	// Publish event
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to publish workflow completed event: %w", err)
 	}
 
@@ -672,7 +672,7 @@ func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskI
 		},
 	}
 
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task scheduled event: %w", err)
 	}
 
@@ -706,7 +706,7 @@ func (p *WorkflowProcessor) publishTaskStartedEvent(ctx context.Context, taskID 
 		},
 	}
 
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task started event: %w", err)
 	}
 
@@ -742,7 +742,7 @@ func (p *WorkflowProcessor) publishTaskFailedEvent(ctx context.Context, taskID s
 		},
 	}
 
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task failed event: %w", err)
 	}
 

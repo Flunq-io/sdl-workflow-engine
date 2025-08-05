@@ -67,7 +67,8 @@
     "noEvents": "Sin eventos",
     "noEventsDescription": "Los eventos aparecerán aquí cuando se ejecute el workflow",
     "failedToLoad": "Error al cargar eventos",
-    "viewEventData": "Ver datos completos del evento",
+    "viewEventData": "Ver datos del evento",
+    "viewRawEventData": "Ver datos brutos del evento",
     "taskEvent": "Evento de Tarea",
     "task": "Tarea:",
     "type": "Tipo:",
@@ -75,7 +76,13 @@
     "success": "Éxito",
     "failed": "Falló",
     "execution": "Ejecución:",
-    "taskId": "ID Tarea:"
+    "taskId": "ID Tarea:",
+    "workflowInput": "Entrada del workflow",
+    "workflowOutput": "Salida del workflow",
+    "taskInput": "Entrada de la tarea",
+    "taskOutput": "Salida de la tarea",
+    "fields": "campo",
+    "fields_plural": "campos"
   },
   "status": {
     "pending": "pendiente",

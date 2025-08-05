@@ -53,6 +53,50 @@ func (r *RedisEventStream) Subscribe(ctx context.Context, filters interfaces.Eve
 	return subscription, nil
 }
 
+// Publish publishes an event to Redis Streams
+func (r *RedisEventStream) Publish(ctx context.Context, event *cloudevents.CloudEvent) error {
+	// Serialize event data
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	// Validate workflow ID to prevent malformed stream names
+	if event.WorkflowID == "" {
+		return fmt.Errorf("cannot publish event with empty workflow ID: event_id=%s, type=%s", event.ID, event.Type)
+	}
+
+	// Create stream key based on workflow ID
+	streamKey := fmt.Sprintf("events:workflow:%s", event.WorkflowID)
+
+	// Store in Redis Stream
+	args := &redis.XAddArgs{
+		Stream: streamKey,
+		Values: map[string]interface{}{
+			"event_id":     event.ID,
+			"event_type":   event.Type,
+			"source":       event.Source,
+			"workflow_id":  event.WorkflowID,
+			"data":         string(eventData),
+			"timestamp":    event.Time.Unix(),
+			"spec_version": event.SpecVersion,
+		},
+	}
+
+	messageID, err := r.client.XAdd(ctx, args).Result()
+	if err != nil {
+		return fmt.Errorf("failed to publish event to Redis Stream: %w", err)
+	}
+
+	r.logger.Debug("Published event to Redis Streams",
+		zap.String("event_id", event.ID),
+		zap.String("event_type", event.Type),
+		zap.String("workflow_id", event.WorkflowID),
+		zap.String("message_id", messageID))
+
+	return nil
+}
+
 // RedisEventStreamSubscription represents a Redis Streams subscription
 type RedisEventStreamSubscription struct {
 	client        *redis.Client

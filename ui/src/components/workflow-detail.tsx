@@ -1,6 +1,6 @@
 'use client'
 
-import { Workflow } from '@/lib/api'
+import { Workflow, WorkflowEvent } from '@/lib/api'
 import { useLocale } from 'next-intl'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +22,7 @@ import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
 
 interface WorkflowDetailProps {
   workflow: Workflow
+  events?: WorkflowEvent[]
 }
 
 function extractTaskNames(definition: Record<string, any>): string[] {
@@ -56,6 +57,64 @@ function getStatusIcon(status: Workflow['status']) {
   }
 }
 
+// Helper function to determine task status from events
+function getTaskStatus(taskName: string, events: WorkflowEvent[] = []) {
+  // Filter events that match this exact task name
+  const taskEvents = events.filter(event => {
+    // Handle different event data structures
+    let eventTaskName = null
+
+    if (event.type === 'io.flunq.task.requested') {
+      eventTaskName = event.data?.task_name
+    } else if (event.type === 'io.flunq.task.completed') {
+      eventTaskName = event.data?.data?.task_name || event.data?.task_name
+    }
+
+    return eventTaskName === taskName
+  })
+
+  // Check for task completion
+  const hasCompleted = taskEvents.some(event =>
+    event.type === 'io.flunq.task.completed'
+  )
+
+  // Check for task start/request
+  const hasStarted = taskEvents.some(event =>
+    event.type === 'io.flunq.task.requested' ||
+    event.type === 'io.flunq.task.started'
+  )
+
+  if (hasCompleted) return 'completed'
+  if (hasStarted) return 'active'
+  return 'pending'
+}
+
+// Helper function to find the current active task
+function getCurrentTaskIndex(tasks: any[], events: WorkflowEvent[] = []) {
+  // Find the task that was requested but not yet completed (active task)
+  for (let i = 0; i < tasks.length; i++) {
+    const taskName = tasks[i].name || Object.keys(tasks[i])[0]
+    const status = getTaskStatus(taskName, events)
+
+    if (status === 'active') {
+      return i
+    }
+  }
+
+  // If no active task found, find the first pending task
+  for (let i = 0; i < tasks.length; i++) {
+    const taskName = tasks[i].name || Object.keys(tasks[i])[0]
+    const status = getTaskStatus(taskName, events)
+
+    if (status === 'pending') {
+      return i
+    }
+  }
+
+  // If all tasks are completed, highlight the last task
+  return Math.max(0, tasks.length - 1)
+}
+
 function getStatusVariant(status: Workflow['status']) {
   switch (status) {
     case 'pending':
@@ -77,9 +136,19 @@ function getStatusVariant(status: Workflow['status']) {
   }
 }
 
-export function WorkflowDetail({ workflow }: WorkflowDetailProps) {
+export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
   const taskNames = extractTaskNames(workflow.definition)
   const locale = useLocale()
+  const currentTaskIndex = getCurrentTaskIndex(workflow.definition?.do || [], events)
+
+  // Debug task statuses
+  console.log('=== Task Status Debug ===')
+  taskNames.forEach((taskName, index) => {
+    const status = getTaskStatus(taskName, events, index)
+    console.log(`Task ${index}: ${taskName} = ${status}`)
+  })
+  console.log(`Current task index: ${currentTaskIndex}`)
+  console.log('=========================')
 
   return (
     <div className="space-y-6">
@@ -107,23 +176,33 @@ export function WorkflowDetail({ workflow }: WorkflowDetailProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {taskNames.map((taskName, index) => (
-                <div key={taskName} className="flex items-center gap-2 text-sm">
-                  <div className="flex items-center gap-1">
-                    <div className={`w-2 h-2 rounded-full ${
-                      workflow.status === 'completed' ? 'bg-green-500' :
-                      workflow.status === 'running' && index === 0 ? 'bg-blue-500' :
-                      'bg-gray-300'
-                    }`} />
-                    <span className={workflow.status === 'completed' ? 'text-foreground' : 'text-muted-foreground'}>
-                      {taskName}
-                    </span>
+              {taskNames.map((taskName, index) => {
+                const taskStatus = getTaskStatus(taskName, events)
+                const isCurrentTask = index === currentTaskIndex
+                return (
+                  <div key={taskName} className="flex items-center gap-2 text-sm">
+                    <div className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${
+                        taskStatus === 'completed' ? 'bg-green-500' :
+                        taskStatus === 'active' ? 'bg-blue-500' :
+                        isCurrentTask && workflow.status === 'running' ? 'bg-blue-500' :
+                        'bg-gray-300'
+                      }`} />
+                      <span className={`${
+                        taskStatus === 'completed' ? 'text-foreground font-medium' :
+                        taskStatus === 'active' ? 'text-foreground font-medium' :
+                        isCurrentTask && workflow.status === 'running' ? 'text-foreground font-medium' :
+                        'text-muted-foreground'
+                      }`}>
+                        {taskName}
+                      </span>
+                    </div>
+                    {index < taskNames.length - 1 && (
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                    )}
                   </div>
-                  {index < taskNames.length - 1 && (
-                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {workflow.status === 'completed' && (

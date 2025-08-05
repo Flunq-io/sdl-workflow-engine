@@ -67,7 +67,8 @@
     "noEvents": "Geen gebeurtenissen",
     "noEventsDescription": "Gebeurtenissen verschijnen hier wanneer de workflow wordt uitgevoerd",
     "failedToLoad": "Laden van gebeurtenissen mislukt",
-    "viewEventData": "Volledige gebeurtenisgegevens bekijken",
+    "viewEventData": "Gebeurtenisgegevens bekijken",
+    "viewRawEventData": "Ruwe gebeurtenisgegevens bekijken",
     "taskEvent": "Taak Gebeurtenis",
     "task": "Taak:",
     "type": "Type:",
@@ -75,7 +76,13 @@
     "success": "Succes",
     "failed": "Mislukt",
     "execution": "Uitvoering:",
-    "taskId": "Taak ID:"
+    "taskId": "Taak ID:",
+    "workflowInput": "Workflow invoer",
+    "workflowOutput": "Workflow uitvoer",
+    "taskInput": "Taak invoer",
+    "taskOutput": "Taak uitvoer",
+    "fields": "veld",
+    "fields_plural": "velden"
   },
   "status": {
     "pending": "in behandeling",

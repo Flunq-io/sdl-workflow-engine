@@ -39,8 +39,8 @@ message TaskStartedEvent {
   string correlation_id = 12;
 }
 
-// TaskCompletedEvent represents a task that has completed successfully
-message TaskCompletedEvent {
+// TaskCompletedEventV2 represents a task that has completed successfully (extended version)
+message TaskCompletedEventV2 {
   string tenant_id = 1;
   string workflow_id = 2;
   string execution_id = 3;
@@ -108,17 +108,5 @@ message ExecutionCompletedEvent {
   string correlation_id = 12;
 }
 
-// WorkflowState represents the current state of a workflow execution
-message WorkflowState {
-  string tenant_id = 1;
-  string workflow_id = 2;
-  string execution_id = 3;
-  string current_task = 4;
-  google.protobuf.Struct context_data = 5;
-  google.protobuf.Timestamp last_updated = 6;
-  string status = 7; // RUNNING, COMPLETED, FAILED, CANCELLED
-  repeated string completed_tasks = 8;
-  repeated string failed_tasks = 9;
-  int32 retry_count = 10;
-  string correlation_id = 11;
-}
+// Note: WorkflowState and TaskExecutionRecord are now defined in workflow_events.proto
+// to avoid duplication and maintain consistency across the system.

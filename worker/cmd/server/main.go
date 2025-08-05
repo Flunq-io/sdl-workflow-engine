@@ -45,7 +45,7 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", "error", err)
 	}
 
-	// Initialize Event Store client
+	// Initialize Event Store client (for HTTP queries only)
 	eventStoreClient := client.NewEventClient(config.EventStoreURL, "worker-service", logger)
 
 	// Initialize database adapter
@@ -60,10 +60,10 @@ func main() {
 	// Initialize Serverless Workflow engine
 	workflowEngine := engine.NewServerlessWorkflowEngine(zapLogger)
 
-	// Initialize Event Store adapter
+	// Initialize Event Store adapter (HTTP queries only)
 	eventStore := adapters.NewEventStoreAdapter(eventStoreClient, zapLogger)
 
-	// Initialize Redis Event Stream
+	// Initialize Redis Event Stream (for publishing and subscribing)
 	eventStream := adapters.NewRedisEventStream(redisClient, zapLogger)
 
 	// Initialize workflow processor

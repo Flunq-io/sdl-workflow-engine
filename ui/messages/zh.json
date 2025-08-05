@@ -67,7 +67,8 @@
     "noEvents": "暂无事件",
     "noEventsDescription": "工作流执行时事件将显示在这里",
     "failedToLoad": "加载事件失败",
-    "viewEventData": "查看完整事件数据",
+    "viewEventData": "查看事件数据",
+    "viewRawEventData": "查看原始事件数据",
     "taskEvent": "任务事件",
     "task": "任务:",
     "type": "类型:",
@@ -75,7 +76,13 @@
     "success": "成功",
     "failed": "失败",
     "execution": "执行:",
-    "taskId": "任务ID:"
+    "taskId": "任务ID:",
+    "workflowInput": "工作流输入",
+    "workflowOutput": "工作流输出",
+    "taskInput": "任务输入",
+    "taskOutput": "任务输出",
+    "fields": "字段",
+    "fields_plural": "字段"
   },
   "status": {
     "pending": "待处理",

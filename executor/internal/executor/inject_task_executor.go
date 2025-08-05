@@ -71,11 +71,14 @@ func (e *InjectTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*T
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
+		TaskType:    task.TaskType,
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     true,
+		Input:       task.Input,
 		Output:      output,
 		Duration:    duration,
-		ExecutedAt:  startTime,
+		StartedAt:   startTime,
+		ExecutedAt:  time.Now(),
 	}, nil
 }

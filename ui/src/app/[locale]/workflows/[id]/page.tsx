@@ -32,6 +32,8 @@ export default function WorkflowDetailPage() {
     refetchInterval: 5000, // Refresh every 5 seconds for real-time updates
   })
 
+
+
   if (workflowLoading) {
     return (
       <div className="min-h-screen bg-background">
@@ -105,7 +107,7 @@ export default function WorkflowDetailPage() {
                     {t('workflowDetail.collapse')}
                   </Button>
 
-                  <WorkflowDetail workflow={workflow} />
+                  <WorkflowDetail workflow={workflow} events={events?.items || []} />
                 </div>
               )}
 

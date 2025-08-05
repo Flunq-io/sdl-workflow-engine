@@ -41,12 +41,15 @@ type TaskConfig struct {
 type TaskResult struct {
 	TaskID      string                 `json:"task_id"`
 	TaskName    string                 `json:"task_name"`
+	TaskType    string                 `json:"task_type"`
 	WorkflowID  string                 `json:"workflow_id"`
 	ExecutionID string                 `json:"execution_id"`
 	Success     bool                   `json:"success"`
+	Input       map[string]interface{} `json:"input"` // Add input data
 	Output      map[string]interface{} `json:"output"`
 	Error       string                 `json:"error,omitempty"`
 	Duration    time.Duration          `json:"duration"`
+	StartedAt   time.Time              `json:"started_at"` // Add start time
 	ExecutedAt  time.Time              `json:"executed_at"`
 }
 

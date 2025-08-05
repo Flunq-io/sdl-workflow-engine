@@ -56,7 +56,8 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 - **Frontend**: Next.js 14, TypeScript, Tailwind CSS
 - **Event Streaming**: Redis Streams (default), pluggable to Kafka/RabbitMQ/NATS
 - **Event Storage**: Redis (default), pluggable to PostgreSQL/MongoDB/EventStore DB
-- **Database**: PostgreSQL (default), pluggable to MongoDB/DynamoDB
+- **Database**: Redis (current), pluggable to PostgreSQL/MongoDB/DynamoDB
+- **Data Serialization**: JSON (current), protobuf definitions for type safety
 - **Standards**: CloudEvents v1.0, Serverless Workflow DSL 1.0.0
 - **Deployment**: Docker, Kubernetes
 - **Monitoring**: OpenTelemetry, Prometheus
@@ -78,6 +79,7 @@ Flunq.io is built with pluggable backends through generic interfaces:
 - **NATS** (planned) - Lightweight cloud-native messaging
 
 ### **Database** (`shared/pkg/interfaces/database.go`)
+- **Redis** (current) - JSON-serialized workflow state and task data
 - **PostgreSQL** (planned) - Relational database for workflow metadata
 - **MongoDB** (planned) - Document database for flexible schemas
 - **DynamoDB** (planned) - Serverless NoSQL for AWS environments
@@ -118,18 +120,20 @@ See individual service READMEs for detailed setup instructions.
 - [x] **Redis-based event streaming** - CloudEvents compliant with Redis Streams
 - [x] **Basic workflow execution engine** - Full task execution pipeline
 - [x] **Event Store architecture** - Centralized event hub with real-time distribution
+- [x] **Enhanced I/O storage** - Complete workflow and task input/output data storage
 - [x] **Generic interfaces** - Pluggable storage and streaming backends
 - [x] **Multi-tenant support** - Tenant isolation across all services
+- [x] **Web UI with event timeline** - Real-time workflow monitoring with I/O data visualization
 
 ## 🎯 Roadmap
 
-- [ ] PostgreSQL/MongoDB storage implementations
-- [ ] Kafka/RabbitMQ streaming implementations
-- [ ] Advanced DSL features (parallel, switch, try/catch)
-- [ ] REST API endpoints
-- [ ] Web UI dashboard
-- [ ] Advanced monitoring and observability
-- [ ] Kubernetes operator
+- [ ] **Protobuf serialization** - Replace JSON with binary protobuf for performance
+- [ ] **PostgreSQL/MongoDB storage** - Alternative database implementations
+- [ ] **Kafka/RabbitMQ streaming** - Alternative event streaming implementations
+- [ ] **Advanced DSL features** - Parallel, switch, try/catch task types
+- [ ] **REST API endpoints** - Complete CRUD operations for workflows
+- [ ] **Advanced monitoring** - OpenTelemetry, Prometheus, distributed tracing
+- [ ] **Kubernetes operator** - Native Kubernetes deployment and management
 
 ## 📄 License
 

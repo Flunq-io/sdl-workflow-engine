@@ -36,7 +36,7 @@ func (e *CallTaskExecutor) GetTaskType() string {
 // Execute executes a call task
 func (e *CallTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*TaskResult, error) {
 	startTime := time.Now()
-	
+
 	e.logger.Info("Executing call task",
 		zap.String("task_id", task.TaskID),
 		zap.String("task_name", task.TaskName),
@@ -128,18 +128,21 @@ func (e *CallTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*Tas
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
+		TaskType:    task.TaskType,
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     success,
+		Input:       task.Input,
 		Output:      output,
 		Duration:    duration,
-		ExecutedAt:  startTime,
+		StartedAt:   startTime,
+		ExecutedAt:  time.Now(),
 	}, nil
 }
 
 func (e *CallTaskExecutor) createErrorResult(task *TaskRequest, startTime time.Time, errorMsg string) (*TaskResult, error) {
 	duration := time.Since(startTime)
-	
+
 	e.logger.Error("Call task failed",
 		zap.String("task_id", task.TaskID),
 		zap.String("error", errorMsg),
@@ -148,12 +151,15 @@ func (e *CallTaskExecutor) createErrorResult(task *TaskRequest, startTime time.T
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
+		TaskType:    task.TaskType,
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     false,
+		Input:       task.Input,
 		Output:      map[string]interface{}{},
 		Error:       errorMsg,
 		Duration:    duration,
-		ExecutedAt:  startTime,
+		StartedAt:   startTime,
+		ExecutedAt:  time.Now(),
 	}, nil
 }

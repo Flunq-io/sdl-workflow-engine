@@ -33,8 +33,24 @@ type Workflow struct {
 // WorkflowDetail extends Workflow with additional execution information
 type WorkflowDetail struct {
 	Workflow
-	ExecutionCount int        `json:"execution_count" db:"execution_count"`
-	LastExecution  *time.Time `json:"last_execution,omitempty" db:"last_execution"`
+	ExecutionCount int                    `json:"execution_count" db:"execution_count"`
+	LastExecution  *time.Time             `json:"last_execution,omitempty" db:"last_execution"`
+	Input          map[string]interface{} `json:"input,omitempty"`
+	Output         map[string]interface{} `json:"output,omitempty"`
+	TaskExecutions []TaskExecution        `json:"task_executions,omitempty"`
+}
+
+// TaskExecution represents a single task execution with input/output
+type TaskExecution struct {
+	Name         string                 `json:"name"`
+	TaskType     string                 `json:"task_type"`
+	Input        map[string]interface{} `json:"input"`
+	Output       map[string]interface{} `json:"output"`
+	StartedAt    *time.Time             `json:"started_at,omitempty"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	DurationMs   int64                  `json:"duration_ms"`
+	Status       string                 `json:"status"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
 }
 
 // CreateWorkflowRequest represents the request to create a new workflow

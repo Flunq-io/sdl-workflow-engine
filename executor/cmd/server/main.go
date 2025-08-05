@@ -42,12 +42,12 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Initialize Event Store client
+	// Initialize Event Store client (for HTTP queries only)
 	eventStoreClient := client.NewEventClient(config.EventStoreURL, "task-service", zapLogger)
 
 	// Initialize adapters
-	eventStore := adapters.NewEventStoreAdapter(eventStoreClient, zapLogger)
-	eventStream := adapters.NewRedisEventStream(redisClient, zapLogger)
+	eventStore := adapters.NewEventStoreAdapter(eventStoreClient, zapLogger) // HTTP queries only
+	eventStream := adapters.NewRedisEventStream(redisClient, zapLogger)      // Publishing and subscribing
 
 	// Initialize task executors
 	taskExecutors := map[string]executor.TaskExecutor{

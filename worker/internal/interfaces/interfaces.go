@@ -8,28 +8,10 @@ import (
 	"github.com/flunq-io/worker/proto/gen"
 )
 
-// EventStore defines the interface for event storage and retrieval
+// EventStore defines the interface for event queries (HTTP API)
 type EventStore interface {
-	// GetEventHistory retrieves all events for a workflow
+	// GetEventHistory retrieves all events for a workflow via HTTP API
 	GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error)
-
-	// PublishEvent publishes a new event
-	PublishEvent(ctx context.Context, event *cloudevents.CloudEvent) error
-
-	// Subscribe creates a subscription for events
-	Subscribe(ctx context.Context, eventTypes []string, workflowIDs []string) (EventSubscription, error)
-}
-
-// EventSubscription represents an active event subscription
-type EventSubscription interface {
-	// Events returns the channel for receiving events
-	Events() <-chan *cloudevents.CloudEvent
-
-	// Errors returns the channel for receiving errors
-	Errors() <-chan error
-
-	// Close closes the subscription
-	Close() error
 }
 
 // EventStream provides generic event streaming capabilities (Redis Streams, Kafka, RabbitMQ, etc.)

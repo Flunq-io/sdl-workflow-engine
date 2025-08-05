@@ -175,10 +175,22 @@ func (p *TaskProcessor) publishTaskCompletedEvent(ctx context.Context, result *e
 			"error":       result.Error,
 			"duration_ms": result.Duration.Milliseconds(),
 			"executed_at": result.ExecutedAt.Format(time.RFC3339),
+			// Include complete TaskData for enhanced I/O storage
+			"data": map[string]interface{}{
+				"input":  result.Input,  // Add input data
+				"output": result.Output, // Include output data
+				"metadata": map[string]interface{}{
+					"started_at":    result.StartedAt.Format(time.RFC3339),
+					"completed_at":  result.ExecutedAt.Format(time.RFC3339),
+					"duration_ms":   result.Duration.Milliseconds(),
+					"task_type":     result.TaskType,
+					"activity_name": "executor_activity",
+				},
+			},
 		},
 	}
 
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
+	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to publish task completed event: %w", err)
 	}
 

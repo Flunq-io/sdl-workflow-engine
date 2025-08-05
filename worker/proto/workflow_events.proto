@@ -12,12 +12,75 @@ import "google/protobuf/struct.proto";
 message TaskData {
   // Task input data as JSON
   google.protobuf.Struct input = 1;
-  
+
   // Task output data as JSON
   google.protobuf.Struct output = 2;
-  
+
   // Task metadata
   TaskMetadata metadata = 3;
+}
+
+// WorkflowInput represents the initial input to a workflow
+message WorkflowInput {
+  // Input data provided when workflow was started
+  google.protobuf.Struct data = 1;
+
+  // Execution context
+  WorkflowContext context = 2;
+
+  // Timestamp when workflow was started
+  google.protobuf.Timestamp started_at = 3;
+}
+
+// WorkflowOutput represents the final output of a workflow
+message WorkflowOutput {
+  // Final output data produced by the workflow
+  google.protobuf.Struct data = 1;
+
+  // Execution summary
+  ExecutionSummary summary = 2;
+
+  // Timestamp when workflow completed
+  google.protobuf.Timestamp completed_at = 3;
+}
+
+// WorkflowContext provides execution context
+message WorkflowContext {
+  // Unique execution ID
+  string execution_id = 1;
+
+  // Correlation ID for tracing
+  string correlation_id = 2;
+
+  // What triggered this workflow
+  string trigger = 3;
+
+  // Tenant information
+  string tenant = 4;
+
+  // User who initiated the workflow
+  string user_id = 5;
+}
+
+// ExecutionSummary provides high-level execution statistics
+message ExecutionSummary {
+  // Total number of tasks executed
+  int32 total_tasks = 1;
+
+  // Total execution duration in milliseconds
+  int64 duration_ms = 2;
+
+  // Whether workflow completed successfully
+  bool success = 3;
+
+  // Error message if workflow failed
+  string error_message = 4;
+
+  // Number of tasks that completed successfully
+  int32 successful_tasks = 5;
+
+  // Number of tasks that failed
+  int32 failed_tasks = 6;
 }
 
 // TaskMetadata contains execution metadata for a task

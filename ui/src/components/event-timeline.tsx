@@ -1,7 +1,7 @@
 'use client'
 
 import { WorkflowEvent } from '@/lib/api'
-import { useLocale } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { 
@@ -17,6 +17,7 @@ import {
   Database
 } from 'lucide-react'
 import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
+import { useState } from 'react'
 
 interface EventTimelineProps {
   events: WorkflowEvent[]
@@ -70,6 +71,67 @@ function extractTaskName(event: WorkflowEvent): string | null {
   if (event.type.includes('task.')) {
     if (event.data.input?.task_name) return event.data.input.task_name
     if (event.data.output?.task_name) return event.data.output.task_name
+    if (event.data.data?.task_name) return event.data.data.task_name
+  }
+
+  return null
+}
+
+// Check if this event is part of a task pair (requested + completed)
+function findTaskPair(event: WorkflowEvent, events: WorkflowEvent[]): WorkflowEvent | null {
+  if (!isTaskEvent(event.type)) return null
+
+  const taskName = extractTaskName(event)
+  if (!taskName) return null
+
+  if (event.type.includes('requested')) {
+    // Find the corresponding completed event
+    return events.find(e =>
+      e.type.includes('completed') &&
+      extractTaskName(e) === taskName
+    ) || null
+  } else if (event.type.includes('completed')) {
+    // Find the corresponding requested event
+    return events.find(e =>
+      e.type.includes('requested') &&
+      extractTaskName(e) === taskName
+    ) || null
+  }
+
+  return null
+}
+
+function extractInputData(event: WorkflowEvent): Record<string, any> | null {
+  if (!event.data) return null
+
+  // For workflow execution started events
+  if (event.type.includes('execution.started') && event.data.input) {
+    return event.data.input
+  }
+
+  // For task events - check for input_data (protobuf) or input
+  if (event.type.includes('task.')) {
+    if (event.data.input_data) return event.data.input_data
+    if (event.data.input) return event.data.input
+  }
+
+  return null
+}
+
+function extractOutputData(event: WorkflowEvent): Record<string, any> | null {
+  if (!event.data) return null
+
+  // For workflow completion events
+  if (event.type.includes('workflow.completed') && event.data.output) {
+    return event.data.output
+  }
+
+  // For task completion events - check for output_data (protobuf) or output
+  if (event.type.includes('task.completed')) {
+    // Check nested data structure first
+    if (event.data.data?.output) return event.data.data.output
+    if (event.data.output_data) return event.data.output_data
+    if (event.data.output) return event.data.output
   }
 
   return null
@@ -103,8 +165,75 @@ function getEventTitle(event: WorkflowEvent): { title: string; subtitle?: string
   return { title: baseType }
 }
 
+interface DataDisplayProps {
+  title: string
+  data: Record<string, any>
+  variant?: 'input' | 'output' | 'default'
+}
+
+function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const t = useTranslations('eventTimeline')
+
+  const getVariantStyles = () => {
+    switch (variant) {
+      case 'input':
+        return 'border-blue-200 bg-blue-50/50'
+      case 'output':
+        return 'border-green-200 bg-green-50/50'
+      default:
+        return 'border-gray-200 bg-gray-50/50'
+    }
+  }
+
+  const getIconColor = () => {
+    switch (variant) {
+      case 'input':
+        return 'text-blue-600'
+      case 'output':
+        return 'text-green-600'
+      default:
+        return 'text-gray-600'
+    }
+  }
+
+  const fieldCount = Object.keys(data).length
+  const fieldsText = fieldCount === 1 ? t('fields') : t('fields_plural')
+
+  return (
+    <div className={`mt-2 border rounded-md ${getVariantStyles()}`}>
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-3 py-2 text-left flex items-center justify-between hover:bg-white/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Database className={`h-3 w-3 ${getIconColor()}`} />
+          <span className="text-xs font-medium">{title}</span>
+          <Badge variant="outline" className="text-xs">
+            {fieldCount} {fieldsText}
+          </Badge>
+        </div>
+        <div className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+          <span className="text-xs">▶</span>
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="px-3 pb-3">
+          <div className="bg-white rounded border p-2">
+            <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
+              {JSON.stringify(data, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function EventTimeline({ events, isLoading, error }: EventTimelineProps) {
   const locale = useLocale()
+  const t = useTranslations('eventTimeline')
 
   if (error) {
     return (
@@ -112,14 +241,14 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Activity className="h-5 w-5" />
-            Event Timeline
+            {t('title')}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">Failed to load events</p>
+              <p className="text-muted-foreground">{t('failedToLoad')}</p>
               <p className="text-sm text-muted-foreground">{error.message}</p>
             </div>
           </div>
@@ -133,7 +262,7 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           <Activity className="h-5 w-5" />
-          Event Timeline
+          {t('title')}
           {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
         </CardTitle>
       </CardHeader>
@@ -142,8 +271,8 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">No events yet</p>
-              <p className="text-sm text-muted-foreground">Events will appear here as the workflow executes</p>
+              <p className="text-muted-foreground">{t('noEvents')}</p>
+              <p className="text-sm text-muted-foreground">{t('noEventsDescription')}</p>
             </div>
           </div>
         ) : (
@@ -151,7 +280,115 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
             {events.map((event, index) => {
               const { title, subtitle } = getEventTitle(event)
               const taskName = extractTaskName(event)
+              const inputData = extractInputData(event)
+              const outputData = extractOutputData(event)
+              const taskPair = findTaskPair(event, events)
 
+              // For task events, check if we should render as a grouped card
+              const isTaskEvent = event.type.includes('task.')
+              const isRequestedEvent = event.type.includes('requested')
+              const shouldRenderAsGroup = isTaskEvent && isRequestedEvent && taskPair
+
+              if (shouldRenderAsGroup) {
+                // Render task pair as a grouped card
+                const requestedEvent = event
+                const completedEvent = taskPair
+
+                return (
+                  <div key={`task-pair-${taskName}-${index}`} className="flex gap-4">
+                    {/* Timeline line */}
+                    <div className="flex flex-col items-center">
+                      <div className={`w-8 h-8 rounded-full ${completedEvent ? 'bg-green-600' : 'bg-yellow-500'} flex items-center justify-center text-white`}>
+                        {completedEvent ? <CheckCircle className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+                      </div>
+                      {index < events.length - 1 && (
+                        <div className="w-0.5 h-6 bg-border mt-2" />
+                      )}
+                    </div>
+
+                    {/* Task card content */}
+                    <div className="flex-1 min-w-0 pb-4">
+                      <div className="border rounded-lg p-3 bg-blue-50/50 border-blue-200">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-medium text-sm text-blue-700 flex items-center gap-1">
+                              {/* Special icon for wait tasks */}
+                              {requestedEvent.data?.task_type === 'wait' && (
+                                <Clock className="h-4 w-4 text-orange-500" />
+                              )}
+                              Task: {taskName}
+                            </h4>
+                            <Badge
+                              variant={completedEvent ? "default" : "secondary"}
+                              className={`text-xs ${completedEvent ? 'bg-green-100 text-green-700 hover:bg-green-200' : ''}`}
+                            >
+                              {completedEvent ? "Completed" : "In Progress"}
+                            </Badge>
+                            {/* Show wait duration for wait tasks */}
+                            {requestedEvent.data?.task_type === 'wait' && requestedEvent.data?.config?.parameters?.duration && (
+                              <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
+                                ⏱️ {requestedEvent.data.config.parameters.duration}
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Show both events in the card */}
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs">
+                              <Clock className="h-3 w-3 text-yellow-600" />
+                              <span className="font-medium">Started:</span>
+                              <span className="cursor-help" title={formatAbsoluteTime(requestedEvent.time, locale)}>
+                                {formatRelativeTime(requestedEvent.time, locale)}
+                              </span>
+                            </div>
+                            {completedEvent && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <CheckCircle className="h-3 w-3 text-green-600" />
+                                <span className="font-medium">Completed:</span>
+                                <span className="cursor-help" title={formatAbsoluteTime(completedEvent.time, locale)}>
+                                  {formatRelativeTime(completedEvent.time, locale)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Task Input/Output Data */}
+                          {(() => {
+                            const requestedInputData = extractInputData(requestedEvent)
+                            const completedOutputData = completedEvent ? extractOutputData(completedEvent) : null
+
+                            return (
+                              <>
+                                {requestedInputData && (
+                                  <DataDisplay
+                                    title={t('taskInput')}
+                                    data={requestedInputData}
+                                    variant="input"
+                                  />
+                                )}
+                                {completedOutputData && (
+                                  <DataDisplay
+                                    title={t('taskOutput')}
+                                    data={completedOutputData}
+                                    variant="output"
+                                  />
+                                )}
+                              </>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+
+              // Skip completed events that are already shown in pairs
+              if (isTaskEvent && event.type.includes('completed') && findTaskPair(event, events)) {
+                return null
+              }
+
+              // Render individual events (non-task events or single task events)
               return (
                 <div key={event.id} className="flex gap-4">
                   {/* Timeline line */}
@@ -165,24 +402,16 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                   </div>
 
                   {/* Event content */}
-                  <div className={`flex-1 min-w-0 pb-4 ${isTaskEvent(event.type) ? 'pl-3 border-l-2 border-l-blue-200' : ''}`}>
+                  <div className="flex-1 min-w-0 pb-4">
                     <div className="flex items-start justify-between">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className={`font-medium text-sm ${isTaskEvent(event.type) ? 'text-blue-700' : ''}`}>
+                          <h4 className="font-medium text-sm">
                             {title}
                           </h4>
                           {subtitle && (
                             <Badge variant="secondary" className="text-xs">
                               {subtitle}
-                            </Badge>
-                          )}
-                          <Badge variant="outline" className="text-xs">
-                            {event.source}
-                          </Badge>
-                          {isTaskEvent(event.type) && (
-                            <Badge variant="default" className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200">
-                              Task Event
                             </Badge>
                           )}
                         </div>
@@ -197,63 +426,44 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                           {event.executionid && (
                             <span>Execution: {event.executionid.slice(0, 8)}...</span>
                           )}
-                          {event.taskid && (
-                            <span>Task ID: {event.taskid.slice(-8)}</span>
-                          )}
-                          {taskName && event.type.includes('task.') && (
-                            <span className="font-medium text-foreground">→ {taskName}</span>
-                          )}
                         </div>
                       </div>
                     </div>
 
-                  {/* Task-specific information */}
-                  {taskName && event.type.includes('task.') && (
-                    <div className="mt-2 p-2 bg-muted/50 rounded-md">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="font-medium">Task:</span>
-                        <span className="font-mono bg-background px-1 rounded">{taskName}</span>
-                        {event.data?.task_type && (
-                          <>
-                            <span className="text-muted-foreground">•</span>
-                            <span>Type: {event.data.task_type}</span>
-                          </>
-                        )}
-                        {event.data?.duration_ms && (
-                          <>
-                            <span className="text-muted-foreground">•</span>
-                            <span>Duration: {event.data.duration_ms}ms</span>
-                          </>
-                        )}
-                        {event.data?.success !== undefined && (
-                          <>
-                            <span className="text-muted-foreground">•</span>
-                            <span className={event.data.success ? 'text-green-600' : 'text-red-600'}>
-                              {event.data.success ? 'Success' : 'Failed'}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                    {/* Input/Output Data Display */}
+                    {inputData && (
+                      <DataDisplay
+                        title={event.type.includes('execution.started') ? t('workflowInput') : t('taskInput')}
+                        data={inputData}
+                        variant="input"
+                      />
+                    )}
 
-                  {/* Event data */}
-                  {event.data && Object.keys(event.data).length > 0 && (
-                    <div className="mt-2">
-                      <details className="group">
-                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                          View full event data
-                        </summary>
-                        <div className="mt-2 p-3 bg-muted rounded-md">
-                          <pre className="text-xs overflow-x-auto">
-                            {JSON.stringify(event.data, null, 2)}
-                          </pre>
-                        </div>
-                      </details>
-                    </div>
-                  )}
+                    {outputData && (
+                      <DataDisplay
+                        title={event.type.includes('workflow.completed') ? t('workflowOutput') : t('taskOutput')}
+                        data={outputData}
+                        variant="output"
+                      />
+                    )}
+
+                    {/* Raw event data - only show if no input/output data is displayed */}
+                    {event.data && Object.keys(event.data).length > 0 && !inputData && !outputData && (
+                      <div className="mt-2">
+                        <details className="group">
+                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                            {t('viewEventData')}
+                          </summary>
+                          <div className="mt-2 p-3 bg-muted rounded-md">
+                            <pre className="text-xs overflow-x-auto">
+                              {JSON.stringify(event.data, null, 2)}
+                            </pre>
+                          </div>
+                        </details>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
               )
             })}
           </div>

@@ -18,13 +18,8 @@ type MockEventStore struct {
 	mock.Mock
 }
 
-func (m *MockEventStore) PublishEvent(ctx context.Context, event *cloudevents.CloudEvent) error {
-	args := m.Called(ctx, event)
-	return args.Error(0)
-}
-
-func (m *MockEventStore) GetEvents(ctx context.Context, filters map[string]interface{}) ([]*cloudevents.CloudEvent, error) {
-	args := m.Called(ctx, filters)
+func (m *MockEventStore) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
+	args := m.Called(ctx, workflowID)
 	return args.Get(0).([]*cloudevents.CloudEvent), args.Error(1)
 }
 
@@ -47,7 +42,7 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 	// Setup
 	mockEventStore := new(MockEventStore)
 	logger := zap.NewNop()
-	
+
 	processor := &TaskProcessor{
 		eventStore: mockEventStore,
 		logger:     logger,
@@ -73,7 +68,7 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 		assert.Equal(t, "test-execution-789", event.ExecutionID)
 		assert.Equal(t, "task-completed-test-task-123", event.ID)
 		assert.Equal(t, "executor-service", event.Source)
-		
+
 		// Verify the event data
 		data, ok := event.Data.(map[string]interface{})
 		assert.True(t, ok)
@@ -83,7 +78,7 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 		assert.NotNil(t, data["output"])
 		assert.NotNil(t, data["duration_ms"])
 		assert.NotNil(t, data["executed_at"])
-		
+
 		return true
 	})).Return(nil)
 

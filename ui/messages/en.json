@@ -77,7 +77,8 @@
     "noEvents": "No events yet",
     "noEventsDescription": "Events will appear here as the workflow executes",
     "failedToLoad": "Failed to load events",
-    "viewEventData": "View full event data",
+    "viewEventData": "View event data",
+    "viewRawEventData": "View raw event data",
     "taskEvent": "Task Event",
     "task": "Task:",
     "type": "Type:",
@@ -85,7 +86,13 @@
     "success": "Success",
     "failed": "Failed",
     "execution": "Execution:",
-    "taskId": "Task ID:"
+    "taskId": "Task ID:",
+    "workflowInput": "Workflow Input",
+    "workflowOutput": "Workflow Output",
+    "taskInput": "Task Input",
+    "taskOutput": "Task Output",
+    "fields": "field",
+    "fields_plural": "fields"
   },
   "status": {
     "pending": "pending",

@@ -328,39 +328,56 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			}
 		}
 
-		// Create completed task
-		completedTask := &gen.CompletedTask{
-			Name: taskName,
-			Data: &gen.TaskData{
+		// Extract complete TaskData from event
+		var taskData *gen.TaskData
+		if taskDataMap, exists := eventData["data"].(map[string]interface{}); exists {
+			// Reconstruct TaskData from event data
+			taskData = &gen.TaskData{
+				Input:  e.mapToStruct(taskDataMap["input"]),
+				Output: e.mapToStruct(taskDataMap["output"]),
 				Metadata: &gen.TaskMetadata{
 					CompletedAt: timestamppb.New(event.Time),
 					Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
 				},
-			},
+			}
+
+			// Extract additional metadata if available
+			if metadataMap, metaExists := taskDataMap["metadata"].(map[string]interface{}); metaExists {
+				if startedAtStr, ok := metadataMap["started_at"].(string); ok {
+					if startedAt, err := time.Parse(time.RFC3339, startedAtStr); err == nil {
+						taskData.Metadata.StartedAt = timestamppb.New(startedAt)
+					}
+				}
+				if durationMs, ok := metadataMap["duration_ms"].(float64); ok {
+					taskData.Metadata.DurationMs = int64(durationMs)
+				}
+				if taskType, ok := metadataMap["task_type"].(string); ok {
+					taskData.Metadata.TaskType = taskType
+				}
+			}
+		} else {
+			// Fallback to minimal TaskData if event doesn't contain full data
+			taskData = &gen.TaskData{
+				Metadata: &gen.TaskMetadata{
+					CompletedAt: timestamppb.New(event.Time),
+					Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+				},
+			}
 		}
 
-		// Extract task data
-		if taskData, exists := eventData["data"]; exists {
-			if dataMap, ok := taskData.(map[string]interface{}); ok {
-				if input, exists := dataMap["input"]; exists {
-					if inputMap, ok := input.(map[string]interface{}); ok {
-						completedTask.Data.Input, _ = structpb.NewStruct(inputMap)
-					}
-				}
-				if output, exists := dataMap["output"]; exists {
-					if outputMap, ok := output.(map[string]interface{}); ok {
-						completedTask.Data.Output, _ = structpb.NewStruct(outputMap)
+		// Create completed task with full data
+		completedTask := &gen.CompletedTask{
+			Name: taskName,
+			Data: taskData,
+		}
 
-						// Update workflow variables with task output
-						if state.Variables == nil {
-							state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
-						}
-						for k, v := range outputMap {
-							val, _ := structpb.NewValue(v)
-							state.Variables.Fields[k] = val
-						}
-					}
-				}
+		// Update workflow variables with task output (if available)
+		if taskData.Output != nil && taskData.Output.Fields != nil {
+			if state.Variables == nil {
+				state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+			}
+			for k, v := range taskData.Output.Fields {
+				state.Variables.Fields[k] = v
 			}
 		}
 
@@ -886,4 +903,26 @@ func (e *ServerlessWorkflowEngine) IsWorkflowComplete(ctx context.Context, state
 		"status", state.Status,
 		"current_step", state.CurrentStep)
 	return false
+}
+
+// mapToStruct converts a map[string]interface{} to *structpb.Struct
+func (e *ServerlessWorkflowEngine) mapToStruct(data interface{}) *structpb.Struct {
+	if data == nil {
+		return nil
+	}
+
+	if dataMap, ok := data.(map[string]interface{}); ok {
+		if struct_, err := structpb.NewStruct(dataMap); err == nil {
+			return struct_
+		}
+	}
+
+	// Fallback: try to convert any type to struct
+	if struct_, err := structpb.NewValue(data); err == nil {
+		if structValue := struct_.GetStructValue(); structValue != nil {
+			return structValue
+		}
+	}
+
+	return nil
 }

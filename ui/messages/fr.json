@@ -67,7 +67,8 @@
     "noEvents": "Aucun événement",
     "noEventsDescription": "Les événements apparaîtront ici lors de l'exécution du workflow",
     "failedToLoad": "Échec du chargement des événements",
-    "viewEventData": "Voir les données complètes de l'événement",
+    "viewEventData": "Voir les données de l'événement",
+    "viewRawEventData": "Voir les données brutes de l'événement",
     "taskEvent": "Événement de Tâche",
     "task": "Tâche:",
     "type": "Type:",
@@ -75,7 +76,13 @@
     "success": "Succès",
     "failed": "Échec",
     "execution": "Exécution:",
-    "taskId": "ID Tâche:"
+    "taskId": "ID Tâche:",
+    "workflowInput": "Entrée du workflow",
+    "workflowOutput": "Sortie du workflow",
+    "taskInput": "Entrée de la tâche",
+    "taskOutput": "Sortie de la tâche",
+    "fields": "champ",
+    "fields_plural": "champs"
   },
   "status": {
     "pending": "en attente",

@@ -30,9 +30,24 @@ func (m *MockEventStore) PublishEvent(ctx context.Context, event *cloudevents.Cl
 	return args.Error(0)
 }
 
-func (m *MockEventStore) Subscribe(ctx context.Context, eventTypes []string, workflowIDs []string) (interfaces.EventSubscription, error) {
-	args := m.Called(ctx, eventTypes, workflowIDs)
-	return args.Get(0).(interfaces.EventSubscription), args.Error(1)
+// MockEventStream is a mock implementation of EventStream interface
+type MockEventStream struct {
+	mock.Mock
+}
+
+func (m *MockEventStream) Subscribe(ctx context.Context, filters interfaces.EventStreamFilters) (interfaces.EventStreamSubscription, error) {
+	args := m.Called(ctx, filters)
+	return args.Get(0).(interfaces.EventStreamSubscription), args.Error(1)
+}
+
+func (m *MockEventStream) Publish(ctx context.Context, event *cloudevents.CloudEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
+func (m *MockEventStream) Close() error {
+	args := m.Called()
+	return args.Error(0)
 }
 
 // MockDatabase is a mock implementation of Database interface
@@ -218,6 +233,7 @@ func (m *MockMetrics) StartTimer(name string, tags map[string]string) func() {
 func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 	// Setup mocks
 	mockEventStore := &MockEventStore{}
+	mockEventStream := &MockEventStream{}
 	mockDatabase := &MockDatabase{}
 	mockEngine := &MockWorkflowEngine{}
 	mockSerializer := &MockSerializer{}
@@ -227,6 +243,7 @@ func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 	// Create processor
 	processor := NewWorkflowProcessor(
 		mockEventStore,
+		mockEventStream,
 		mockDatabase,
 		mockEngine,
 		mockSerializer,

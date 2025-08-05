@@ -67,7 +67,8 @@
     "noEvents": "Keine Ereignisse",
     "noEventsDescription": "Ereignisse werden hier angezeigt, wenn der Workflow ausgeführt wird",
     "failedToLoad": "Fehler beim Laden der Ereignisse",
-    "viewEventData": "Vollständige Ereignisdaten anzeigen",
+    "viewEventData": "Ereignisdaten anzeigen",
+    "viewRawEventData": "Rohe Ereignisdaten anzeigen",
     "taskEvent": "Aufgaben-Ereignis",
     "task": "Aufgabe:",
     "type": "Typ:",
@@ -75,7 +76,13 @@
     "success": "Erfolg",
     "failed": "Fehlgeschlagen",
     "execution": "Ausführung:",
-    "taskId": "Aufgaben-ID:"
+    "taskId": "Aufgaben-ID:",
+    "workflowInput": "Workflow-Eingabe",
+    "workflowOutput": "Workflow-Ausgabe",
+    "taskInput": "Aufgaben-Eingabe",
+    "taskOutput": "Aufgaben-Ausgabe",
+    "fields": "Feld",
+    "fields_plural": "Felder"
   },
   "status": {
     "pending": "ausstehend",
