@@ -17,7 +17,15 @@
     "all": "All",
     "none": "None",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "name": "Name",
+    "status": "Status",
+    "tasks": "Tasks",
+    "created": "Created",
+    "executions": "Executions",
+    "actions": "Actions",
+    "cards": "Cards",
+    "table": "Table"
   },
   "header": {
     "title": "Flunq.io",

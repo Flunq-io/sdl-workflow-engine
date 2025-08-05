@@ -18,7 +18,9 @@ import {
   Timer,
   Eye,
   Zap,
-  ArrowRight
+  ArrowRight,
+  LayoutGrid,
+  Table
 } from 'lucide-react'
 import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
 
@@ -95,6 +97,7 @@ function getStatusVariant(status: Workflow['status']) {
 
 export function WorkflowList({ workflows }: WorkflowListProps) {
   const [filter, setFilter] = useState<'all' | Workflow['status']>('all')
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
   const t = useTranslations()
   const locale = useLocale()
 
@@ -109,34 +112,57 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
 
   return (
     <div className="space-y-6">
-      {/* Status Filter */}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={filter === 'all' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setFilter('all')}
-        >
-          All ({workflows.length})
-        </Button>
-        {(['pending', 'running', 'waiting', 'suspended', 'cancelled', 'faulted', 'completed'] as const).map(status => {
-          const count = statusCounts[status] || 0
-          if (count === 0) return null
-          
-          return (
-            <Button
-              key={status}
-              variant={filter === status ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter(status)}
-              className="capitalize"
-            >
-              {status} ({count})
-            </Button>
-          )
-        })}
+      {/* Header with Filters and View Toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        {/* Status Filter */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={filter === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setFilter('all')}
+          >
+            All ({workflows.length})
+          </Button>
+          {(['pending', 'running', 'waiting', 'suspended', 'cancelled', 'faulted', 'completed'] as const).map(status => {
+            const count = statusCounts[status] || 0
+            if (count === 0) return null
+
+            return (
+              <Button
+                key={status}
+                variant={filter === status ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilter(status)}
+                className="capitalize"
+              >
+                {status} ({count})
+              </Button>
+            )
+          })}
+        </div>
+
+        {/* View Toggle */}
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === 'cards' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('cards')}
+          >
+            <LayoutGrid className="h-4 w-4 mr-1" />
+            {t('common.cards')}
+          </Button>
+          <Button
+            variant={viewMode === 'table' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('table')}
+          >
+            <Table className="h-4 w-4 mr-1" />
+            {t('common.table')}
+          </Button>
+        </div>
       </div>
 
-      {/* Workflow Grid */}
+      {/* Workflow Content */}
       {filteredWorkflows.length === 0 ? (
         <div className="text-center py-12">
           <h3 className="text-lg font-semibold text-foreground mb-2">{t('workflows.noWorkflows')}</h3>
@@ -147,7 +173,8 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
             }
           </p>
         </div>
-      ) : (
+      ) : viewMode === 'cards' ? (
+        // Cards View
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredWorkflows.map((workflow) => {
             const taskNames = extractTaskNames(workflow.definition)
@@ -230,6 +257,83 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
             </Card>
             )
           })}
+        </div>
+      ) : (
+        // Table View
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-4 font-medium">{t('common.name')}</th>
+                <th className="text-left p-4 font-medium">{t('common.status')}</th>
+                <th className="text-left p-4 font-medium">{t('common.tasks')}</th>
+                <th className="text-left p-4 font-medium">{t('common.created')}</th>
+                <th className="text-left p-4 font-medium">{t('common.executions')}</th>
+                <th className="text-left p-4 font-medium">{t('common.actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredWorkflows.map((workflow) => {
+                const taskNames = extractTaskNames(workflow.definition)
+
+                return (
+                  <tr key={workflow.id} className="border-t hover:bg-muted/25">
+                    <td className="p-4">
+                      <div>
+                        <div className="font-medium">{workflow.name}</div>
+                        <div className="text-sm text-muted-foreground line-clamp-1">
+                          {workflow.description || 'No description'}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <Badge variant={getStatusVariant(workflow.status)} className="flex items-center gap-1 w-fit">
+                        {getStatusIcon(workflow.status)}
+                        {workflow.status}
+                      </Badge>
+                    </td>
+                    <td className="p-4">
+                      <div className="text-sm">
+                        {taskNames.length} task{taskNames.length !== 1 ? 's' : ''}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <span
+                        title={formatAbsoluteTime(workflow.created_at, locale)}
+                        className="cursor-help text-sm"
+                      >
+                        {formatRelativeTime(workflow.created_at, locale)}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <div className="text-sm">
+                        {workflow.execution_count !== undefined ? (
+                          <span>
+                            {workflow.execution_count} execution{workflow.execution_count !== 1 ? 's' : ''}
+                            {workflow.last_execution && (
+                              <div className="text-xs text-muted-foreground">
+                                Last: {formatRelativeTime(workflow.last_execution, locale)}
+                              </div>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/${locale}/workflows/${workflow.id}`}>
+                          <Eye className="h-4 w-4 mr-1" />
+                          {t('common.view')}
+                        </Link>
+                      </Button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
