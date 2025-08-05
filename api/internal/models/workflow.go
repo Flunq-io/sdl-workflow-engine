@@ -5,13 +5,17 @@ import (
 	"time"
 )
 
-// WorkflowStatus represents the status of a workflow
+// WorkflowStatus represents the status of a workflow (SDL compliant)
 type WorkflowStatus string
 
 const (
-	WorkflowStatusCreated  WorkflowStatus = "created"
-	WorkflowStatusActive   WorkflowStatus = "active"
-	WorkflowStatusInactive WorkflowStatus = "inactive"
+	WorkflowStatusPending   WorkflowStatus = "pending"   // The workflow has been initiated and is pending execution
+	WorkflowStatusRunning   WorkflowStatus = "running"   // The workflow is currently in progress
+	WorkflowStatusWaiting   WorkflowStatus = "waiting"   // The workflow execution is temporarily paused, awaiting events or time
+	WorkflowStatusSuspended WorkflowStatus = "suspended" // The workflow execution has been manually paused by a user
+	WorkflowStatusCancelled WorkflowStatus = "cancelled" // The workflow execution has been terminated before completion
+	WorkflowStatusFaulted   WorkflowStatus = "faulted"   // The workflow execution has encountered an error
+	WorkflowStatusCompleted WorkflowStatus = "completed" // The workflow ran to completion
 )
 
 // Workflow represents a workflow definition
@@ -51,10 +55,10 @@ type UpdateWorkflowRequest struct {
 
 // WorkflowListResponse represents the response for listing workflows
 type WorkflowListResponse struct {
-	Workflows []Workflow `json:"workflows"`
-	Total     int        `json:"total"`
-	Limit     int        `json:"limit"`
-	Offset    int        `json:"offset"`
+	Items  []Workflow `json:"items"`
+	Total  int        `json:"total"`
+	Limit  int        `json:"limit"`
+	Offset int        `json:"offset"`
 }
 
 // Validate validates the workflow definition
@@ -62,20 +66,20 @@ func (w *Workflow) Validate() error {
 	if w.Name == "" {
 		return &ValidationError{Field: "name", Message: "name is required"}
 	}
-	
+
 	if w.Definition == nil {
 		return &ValidationError{Field: "definition", Message: "definition is required"}
 	}
-	
+
 	// Basic validation of workflow definition structure
 	if id, ok := w.Definition["id"]; !ok || id == "" {
 		return &ValidationError{Field: "definition.id", Message: "workflow definition must have an id"}
 	}
-	
+
 	if specVersion, ok := w.Definition["specVersion"]; !ok || specVersion == "" {
 		return &ValidationError{Field: "definition.specVersion", Message: "workflow definition must have a specVersion"}
 	}
-	
+
 	return nil
 }
 
@@ -181,16 +185,16 @@ func (w *Workflow) Clone() *Workflow {
 		CreatedAt:   w.CreatedAt,
 		UpdatedAt:   w.UpdatedAt,
 	}
-	
+
 	// Copy tags
 	copy(clone.Tags, w.Tags)
-	
+
 	// Deep copy definition
 	if w.Definition != nil {
 		definitionJSON, _ := json.Marshal(w.Definition)
 		json.Unmarshal(definitionJSON, &clone.Definition)
 	}
-	
+
 	return clone
 }
 

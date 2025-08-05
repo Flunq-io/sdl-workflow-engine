@@ -5,15 +5,17 @@ import (
 	"time"
 )
 
-// ExecutionStatus represents the status of a workflow execution
+// ExecutionStatus represents the status of a workflow execution (SDL compliant)
 type ExecutionStatus string
 
 const (
-	ExecutionStatusPending   ExecutionStatus = "pending"
-	ExecutionStatusRunning   ExecutionStatus = "running"
-	ExecutionStatusCompleted ExecutionStatus = "completed"
-	ExecutionStatusFailed    ExecutionStatus = "failed"
-	ExecutionStatusCancelled ExecutionStatus = "cancelled"
+	ExecutionStatusPending   ExecutionStatus = "pending"   // The execution has been initiated and is pending execution
+	ExecutionStatusRunning   ExecutionStatus = "running"   // The execution is currently in progress
+	ExecutionStatusWaiting   ExecutionStatus = "waiting"   // The execution is temporarily paused, awaiting events or time
+	ExecutionStatusSuspended ExecutionStatus = "suspended" // The execution has been manually paused by a user
+	ExecutionStatusCancelled ExecutionStatus = "cancelled" // The execution has been terminated before completion
+	ExecutionStatusFaulted   ExecutionStatus = "faulted"   // The execution has encountered an error
+	ExecutionStatusCompleted ExecutionStatus = "completed" // The execution ran to completion
 )
 
 // Execution represents a workflow execution instance
@@ -86,7 +88,7 @@ func (e *Execution) SetError(code, message string, details map[string]interface{
 		Message: message,
 		Details: details,
 	}
-	e.Status = ExecutionStatusFailed
+	e.Status = ExecutionStatusFaulted
 }
 
 // Complete marks the execution as completed
@@ -95,7 +97,7 @@ func (e *Execution) Complete(output map[string]interface{}) {
 	e.Status = ExecutionStatusCompleted
 	e.Output = output
 	e.CompletedAt = &now
-	
+
 	// Calculate duration
 	duration := now.Sub(e.StartedAt).Milliseconds()
 	e.DurationMs = &duration
@@ -106,12 +108,12 @@ func (e *Execution) Cancel(reason string) {
 	now := time.Now()
 	e.Status = ExecutionStatusCancelled
 	e.CompletedAt = &now
-	
+
 	// Set cancellation reason in error
 	e.SetError("EXECUTION_CANCELLED", "Execution was cancelled", map[string]interface{}{
 		"reason": reason,
 	})
-	
+
 	// Calculate duration
 	duration := now.Sub(e.StartedAt).Milliseconds()
 	e.DurationMs = &duration
@@ -120,10 +122,10 @@ func (e *Execution) Cancel(reason string) {
 // Fail marks the execution as failed
 func (e *Execution) Fail(code, message string, details map[string]interface{}) {
 	now := time.Now()
-	e.Status = ExecutionStatusFailed
+	e.Status = ExecutionStatusFaulted
 	e.CompletedAt = &now
 	e.SetError(code, message, details)
-	
+
 	// Calculate duration
 	duration := now.Sub(e.StartedAt).Milliseconds()
 	e.DurationMs = &duration
@@ -136,9 +138,9 @@ func (e *Execution) IsRunning() bool {
 
 // IsCompleted returns true if the execution has finished (completed, failed, or cancelled)
 func (e *Execution) IsCompleted() bool {
-	return e.Status == ExecutionStatusCompleted || 
-		   e.Status == ExecutionStatusFailed || 
-		   e.Status == ExecutionStatusCancelled
+	return e.Status == ExecutionStatusCompleted ||
+		e.Status == ExecutionStatusFaulted ||
+		e.Status == ExecutionStatusCancelled
 }
 
 // GetInputField safely gets a field from the execution input
@@ -228,25 +230,25 @@ func (e *Execution) Clone() *Execution {
 		StartedAt:     e.StartedAt,
 		DurationMs:    e.DurationMs,
 	}
-	
+
 	// Copy completed time
 	if e.CompletedAt != nil {
 		completedAt := *e.CompletedAt
 		clone.CompletedAt = &completedAt
 	}
-	
+
 	// Deep copy input
 	if e.Input != nil {
 		inputJSON, _ := json.Marshal(e.Input)
 		json.Unmarshal(inputJSON, &clone.Input)
 	}
-	
+
 	// Deep copy output
 	if e.Output != nil {
 		outputJSON, _ := json.Marshal(e.Output)
 		json.Unmarshal(outputJSON, &clone.Output)
 	}
-	
+
 	// Copy error
 	if e.Error != nil {
 		clone.Error = &ExecutionError{
@@ -258,6 +260,6 @@ func (e *Execution) Clone() *Execution {
 			json.Unmarshal(detailsJSON, &clone.Error.Details)
 		}
 	}
-	
+
 	return clone
 }

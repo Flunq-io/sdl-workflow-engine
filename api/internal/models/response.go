@@ -23,7 +23,7 @@ type HealthResponse struct {
 // EventHistoryResponse represents the response for workflow event history
 type EventHistoryResponse struct {
 	WorkflowID string       `json:"workflow_id"`
-	Events     []CloudEvent `json:"events"`
+	Items      []CloudEvent `json:"items"`
 	Total      int          `json:"total"`
 	Since      string       `json:"since,omitempty"`
 }

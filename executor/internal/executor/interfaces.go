@@ -73,6 +73,10 @@ func ParseTaskRequestFromEvent(event *cloudevents.CloudEvent) (*TaskRequest, err
 		ExecutionID: event.ExecutionID,
 	}
 
+	// Debug: Check if WorkflowID is empty
+	fmt.Printf("DEBUG: Parsed TaskRequest - WorkflowID: '%s', ExecutionID: '%s', TaskName: '%s'\n",
+		request.WorkflowID, request.ExecutionID, request.TaskName)
+
 	// Parse input if present
 	if input, ok := data["input"].(map[string]interface{}); ok {
 		request.Input = input

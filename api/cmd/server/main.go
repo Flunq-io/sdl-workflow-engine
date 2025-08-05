@@ -42,7 +42,7 @@ func main() {
 	eventClient := client.NewEventClient(eventStoreURL, "api-service", logger)
 
 	// Initialize repositories
-	workflowRepo := repository.NewMemoryWorkflowRepository()
+	workflowRepo := repository.NewRedisWorkflowRepository(redisClient, logger)
 	executionRepo := repository.NewMemoryExecutionRepository()
 
 	// Initialize services

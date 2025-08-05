@@ -1,0 +1,103 @@
+{
+  "common": {
+    "loading": "Laden...",
+    "error": "Fehler",
+    "retry": "Wiederholen",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "view": "Anzeigen",
+    "close": "Schließen",
+    "back": "Zurück",
+    "next": "Weiter",
+    "previous": "Vorherige",
+    "search": "Suchen",
+    "filter": "Filter",
+    "all": "Alle",
+    "none": "Keine",
+    "yes": "Ja",
+    "no": "Nein"
+  },
+  "header": {
+    "title": "Flunq.io",
+    "subtitle": "Workflow-Engine",
+    "toggleTheme": "Design wechseln"
+  },
+  "navigation": {
+    "workflows": "Workflows",
+    "executions": "Ausführungen",
+    "api": "API",
+    "settings": "Einstellungen"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "subtitle": "Verwalten und überwachen Sie Ihre serverlosen Workflows",
+    "noWorkflows": "Keine Workflows gefunden",
+    "noWorkflowsDescription": "Es wurden noch keine Workflows erstellt.",
+    "noWorkflowsFiltered": "Keine Workflows mit Status \"{status}\".",
+    "executionCount": "{count} Ausführung",
+    "executionCount_plural": "{count} Ausführungen",
+    "lastExecution": "Letzte: {time}",
+    "createdTime": "Erstellt {time}",
+    "taskSummary": {
+      "completed": "{count} Aufgaben abgeschlossen: {tasks}",
+      "running": "Laufende Aufgaben: {tasks}",
+      "default": "{count} Aufgaben: {tasks}"
+    }
+  },
+  "workflowDetail": {
+    "backToWorkflows": "Zurück zu Workflows",
+    "noDescription": "Keine Beschreibung verfügbar",
+    "status": "Status",
+    "metadata": "Metadaten",
+    "tasks": "Aufgaben ({count})",
+    "allTasksCompleted": "Alle Aufgaben erfolgreich abgeschlossen",
+    "id": "ID:",
+    "created": "Erstellt:",
+    "updated": "Aktualisiert:",
+    "executions": "Ausführungen:",
+    "lastExecution": "Letzte Ausführung:",
+    "tags": "Tags",
+    "notFound": "Workflow nicht gefunden",
+    "notFoundDescription": "Der angeforderte Workflow konnte nicht gefunden werden."
+  },
+  "eventTimeline": {
+    "title": "Ereignis-Zeitlinie",
+    "noEvents": "Keine Ereignisse",
+    "noEventsDescription": "Ereignisse werden hier angezeigt, wenn der Workflow ausgeführt wird",
+    "failedToLoad": "Fehler beim Laden der Ereignisse",
+    "viewEventData": "Vollständige Ereignisdaten anzeigen",
+    "taskEvent": "Aufgaben-Ereignis",
+    "task": "Aufgabe:",
+    "type": "Typ:",
+    "duration": "Dauer:",
+    "success": "Erfolg",
+    "failed": "Fehlgeschlagen",
+    "execution": "Ausführung:",
+    "taskId": "Aufgaben-ID:"
+  },
+  "status": {
+    "pending": "ausstehend",
+    "running": "laufend",
+    "waiting": "wartend",
+    "suspended": "pausiert",
+    "cancelled": "abgebrochen",
+    "faulted": "fehlerhaft",
+    "completed": "abgeschlossen"
+  },
+  "language": {
+    "select": "Sprache auswählen",
+    "english": "English",
+    "french": "Français",
+    "german": "Deutsch",
+    "spanish": "Español",
+    "chinese": "中文",
+    "dutch": "Nederlands"
+  },
+  "theme": {
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System"
+  }
+}

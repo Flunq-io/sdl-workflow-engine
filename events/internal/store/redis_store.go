@@ -178,16 +178,44 @@ func (r *RedisEventStore) GetStreamEvents(ctx context.Context, streamID string, 
 // parseEventFromMessage converts a Redis stream message to a CloudEvent
 func (r *RedisEventStore) parseEventFromMessage(message redis.XMessage) (*cloudevents.CloudEvent, error) {
 	values := message.Values
+	event := &cloudevents.CloudEvent{}
 
-	// Extract event data
-	eventDataStr, ok := values["data"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid event data")
+	// Extract CloudEvent fields from Redis message values (not from data field)
+	if eventID, ok := values["event_id"].(string); ok {
+		event.ID = eventID
+	}
+	if eventType, ok := values["event_type"].(string); ok {
+		event.Type = eventType
+	}
+	if source, ok := values["source"].(string); ok {
+		event.Source = source
+	}
+	if workflowID, ok := values["workflow_id"].(string); ok {
+		event.WorkflowID = workflowID
+	}
+	if executionID, ok := values["execution_id"].(string); ok {
+		event.ExecutionID = executionID
+	}
+	if taskID, ok := values["task_id"].(string); ok {
+		event.TaskID = taskID
+	}
+	if specVersion, ok := values["spec_version"].(string); ok {
+		event.SpecVersion = specVersion
 	}
 
-	var event cloudevents.CloudEvent
-	if err := json.Unmarshal([]byte(eventDataStr), &event); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal event data: %w", err)
+	// Parse timestamp
+	if timestampStr, ok := values["timestamp"].(string); ok {
+		if timestamp, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+			event.Time = timestamp
+		}
+	}
+
+	// Parse data payload from the data field
+	if eventDataStr, ok := values["data"].(string); ok {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(eventDataStr), &data); err == nil {
+			event.Data = data
+		}
 	}
 
 	// Set Redis message ID for tracking
@@ -195,7 +223,7 @@ func (r *RedisEventStore) parseEventFromMessage(message redis.XMessage) (*cloude
 		"redis_message_id": message.ID,
 	}
 
-	return &event, nil
+	return event, nil
 }
 
 // GetStats returns statistics about the event store

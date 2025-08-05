@@ -41,7 +41,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	workflow, err := h.workflowService.CreateWorkflow(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("Failed to create workflow", zap.Error(err))
-		
+
 		if validationErr, ok := err.(*models.ValidationError); ok {
 			c.JSON(http.StatusBadRequest, models.NewErrorResponse(
 				models.ErrorCodeValidation,
@@ -51,7 +51,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 			}).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -59,7 +59,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Workflow created successfully", 
+	h.logger.Info("Workflow created successfully",
 		zap.String("workflow_id", workflow.ID),
 		zap.String("name", workflow.Name))
 
@@ -96,10 +96,10 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 	}
 
 	response := models.WorkflowListResponse{
-		Workflows: workflows,
-		Total:     total,
-		Limit:     params.Limit,
-		Offset:    params.Offset,
+		Items:  workflows,
+		Total:  total,
+		Limit:  params.Limit,
+		Offset: params.Offset,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -118,10 +118,10 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 
 	workflow, err := h.workflowService.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
-		h.logger.Error("Failed to get workflow", 
+		h.logger.Error("Failed to get workflow",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		
+
 		if err == services.ErrWorkflowNotFound {
 			c.JSON(http.StatusNotFound, models.NewErrorResponse(
 				models.ErrorCodeWorkflowNotFound,
@@ -129,7 +129,7 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 			).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -165,10 +165,10 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 
 	workflow, err := h.workflowService.UpdateWorkflow(c.Request.Context(), workflowID, &req)
 	if err != nil {
-		h.logger.Error("Failed to update workflow", 
+		h.logger.Error("Failed to update workflow",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		
+
 		if err == services.ErrWorkflowNotFound {
 			c.JSON(http.StatusNotFound, models.NewErrorResponse(
 				models.ErrorCodeWorkflowNotFound,
@@ -176,7 +176,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 			).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		if validationErr, ok := err.(*models.ValidationError); ok {
 			c.JSON(http.StatusBadRequest, models.NewErrorResponse(
 				models.ErrorCodeValidation,
@@ -186,7 +186,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 			}).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -194,7 +194,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Workflow updated successfully", 
+	h.logger.Info("Workflow updated successfully",
 		zap.String("workflow_id", workflowID))
 
 	c.JSON(http.StatusOK, workflow)
@@ -213,10 +213,10 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 
 	err := h.workflowService.DeleteWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
-		h.logger.Error("Failed to delete workflow", 
+		h.logger.Error("Failed to delete workflow",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		
+
 		if err == services.ErrWorkflowNotFound {
 			c.JSON(http.StatusNotFound, models.NewErrorResponse(
 				models.ErrorCodeWorkflowNotFound,
@@ -224,7 +224,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 			).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -232,7 +232,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Workflow deleted successfully", 
+	h.logger.Info("Workflow deleted successfully",
 		zap.String("workflow_id", workflowID))
 
 	c.Status(http.StatusNoContent)
@@ -263,10 +263,10 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 
 	execution, err := h.workflowService.ExecuteWorkflow(c.Request.Context(), workflowID, &req)
 	if err != nil {
-		h.logger.Error("Failed to execute workflow", 
+		h.logger.Error("Failed to execute workflow",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		
+
 		if err == services.ErrWorkflowNotFound {
 			c.JSON(http.StatusNotFound, models.NewErrorResponse(
 				models.ErrorCodeWorkflowNotFound,
@@ -274,7 +274,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 			).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -282,7 +282,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Workflow execution started", 
+	h.logger.Info("Workflow execution started",
 		zap.String("workflow_id", workflowID),
 		zap.String("execution_id", execution.ID))
 
@@ -319,10 +319,10 @@ func (h *WorkflowHandler) GetEvents(c *gin.Context) {
 
 	events, err := h.workflowService.GetWorkflowEvents(c.Request.Context(), workflowID, &params)
 	if err != nil {
-		h.logger.Error("Failed to get workflow events", 
+		h.logger.Error("Failed to get workflow events",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		
+
 		if err == services.ErrWorkflowNotFound {
 			c.JSON(http.StatusNotFound, models.NewErrorResponse(
 				models.ErrorCodeWorkflowNotFound,
@@ -330,7 +330,7 @@ func (h *WorkflowHandler) GetEvents(c *gin.Context) {
 			).WithRequestID(getRequestID(c)))
 			return
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,
@@ -340,7 +340,7 @@ func (h *WorkflowHandler) GetEvents(c *gin.Context) {
 
 	response := models.EventHistoryResponse{
 		WorkflowID: workflowID,
-		Events:     events,
+		Items:      events,
 		Total:      len(events),
 		Since:      params.Since,
 	}

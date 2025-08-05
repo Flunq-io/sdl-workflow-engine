@@ -37,6 +37,7 @@ const (
 	WorkflowStatus_WORKFLOW_STATUS_FAILED      WorkflowStatus = 4
 	WorkflowStatus_WORKFLOW_STATUS_CANCELLED   WorkflowStatus = 5
 	WorkflowStatus_WORKFLOW_STATUS_SUSPENDED   WorkflowStatus = 6
+	WorkflowStatus_WORKFLOW_STATUS_WAITING     WorkflowStatus = 7
 )
 
 // TaskData represents input/output data for a task

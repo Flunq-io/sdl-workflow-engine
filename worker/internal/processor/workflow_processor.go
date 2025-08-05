@@ -212,6 +212,15 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		return nil
 	}
 
+	// Only process task.completed events from executor-service
+	if event.Type == "io.flunq.task.completed" && event.Source != "executor-service" {
+		p.logger.Debug("Skipping task.completed event from non-executor source",
+			"event_id", event.ID,
+			"source", event.Source,
+			"workflow_id", event.WorkflowID)
+		return nil
+	}
+
 	// Step 1: Fetch Complete Event History
 	events, err := p.fetchCompleteEventHistory(ctx, event.WorkflowID)
 	if err != nil {
@@ -412,42 +421,58 @@ func (p *WorkflowProcessor) executeTask(ctx context.Context, task *gen.PendingTa
 	return p.publishTaskRequestedEvent(ctx, task, state)
 }
 
-// executeLocalTask executes tasks that can be handled locally (set, wait)
+// executeLocalTask is deprecated - all tasks are now sent to executor service
+// This function is kept for reference but should not be used
 func (p *WorkflowProcessor) executeLocalTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
-	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
+	p.logger.Warn("executeLocalTask is deprecated - all tasks should go through executor service",
+		"task_name", task.Name,
+		"task_type", task.TaskType)
 
-	// 1. Publish TaskScheduled event
-	if err := p.publishTaskScheduledEvent(ctx, taskID, task, state); err != nil {
-		return fmt.Errorf("failed to publish task scheduled event: %w", err)
-	}
-
-	// 2. Publish TaskStarted event
-	if err := p.publishTaskStartedEvent(ctx, taskID, task, state); err != nil {
-		return fmt.Errorf("failed to publish task started event: %w", err)
-	}
-
-	// 3. Execute task using workflow engine
-	startTime := time.Now()
-	taskData, err := p.workflowEngine.ExecuteTask(ctx, task, state)
-	if err != nil {
-		// Publish TaskFailed event
-		p.publishTaskFailedEvent(ctx, taskID, task, state, err, startTime)
-		p.logger.Error("Failed to execute local task",
-			"task_id", taskID,
-			"task_name", task.Name,
-			"task_type", task.TaskType,
-			"error", err)
-		return err
-	}
-
-	// 4. Publish TaskCompleted event
-	duration := time.Since(startTime)
-	return p.publishTaskCompletedEvent(ctx, taskID, task.Name, taskData, state, startTime, duration)
+	// Redirect to executor service
+	return p.executeTask(ctx, task, state)
 }
 
 // publishTaskRequestedEvent publishes a TaskRequested event for external execution
 func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
 	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
+
+	// Get execution ID safely
+	executionID := ""
+	if state.Context != nil {
+		executionID = state.Context.ExecutionId
+	}
+
+	// Extract task-specific parameters from input
+	parameters := make(map[string]interface{})
+	inputData := make(map[string]interface{})
+
+	if task.Input != nil {
+		inputMap := task.Input.AsMap()
+
+		// For wait tasks, extract duration
+		if task.TaskType == "wait" {
+			if duration, exists := inputMap["duration"]; exists {
+				parameters["duration"] = duration
+				p.logger.Debug("Adding duration to task parameters",
+					"task_name", task.Name,
+					"duration", duration)
+			}
+		}
+
+		// For set tasks, extract set data
+		if task.TaskType == "set" {
+			if setData, exists := inputMap["set_data"]; exists {
+				parameters["set_data"] = setData
+			}
+		}
+
+		// Pass through other input data
+		for key, value := range inputMap {
+			if key != "duration" && key != "set_data" {
+				inputData[key] = value
+			}
+		}
+	}
 
 	// Create CloudEvent with JSON data (compatible with Executor Service)
 	event := &cloudevents.CloudEvent{
@@ -456,7 +481,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.requested",
 		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
+		ExecutionID: executionID,
 		TaskID:      taskID,
 		Time:        time.Now(),
 		Data: map[string]interface{}{
@@ -464,13 +489,13 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			"task_name":    task.Name,
 			"task_type":    task.TaskType,
 			"workflow_id":  state.WorkflowId,
-			"execution_id": state.Context.ExecutionId,
-			"input":        map[string]interface{}{}, // Could include task input data
+			"execution_id": executionID,
+			"input":        inputData,
 			"context":      map[string]interface{}{}, // Could include workflow context
 			"config": map[string]interface{}{
 				"timeout":    300, // 5 minutes
 				"retries":    3,
-				"parameters": map[string]interface{}{}, // Task-specific parameters
+				"parameters": parameters, // Task-specific parameters including duration
 			},
 		},
 	}
@@ -489,48 +514,15 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 	return nil
 }
 
-// publishTaskCompletedEvent publishes a TaskCompleted event
+// publishTaskCompletedEvent is deprecated - task.completed events are now published by executor service
+// This function is kept for reference but should not be used
 func (p *WorkflowProcessor) publishTaskCompletedEvent(ctx context.Context, taskID, taskName string, taskData *gen.TaskData, state *gen.WorkflowState, startTime time.Time, duration time.Duration) error {
-	// Create TaskCompleted event with protobuf payload
-	taskCompletedEvent := &gen.TaskCompletedEvent{
-		WorkflowId:  state.WorkflowId,
-		ExecutionId: state.Context.ExecutionId,
-		TaskName:    taskName,
-		Data:        taskData,
-		Context:     state.Context,
-	}
-
-	// Serialize to protobuf
-	eventData, err := p.serializer.SerializeTaskCompletedEvent(taskCompletedEvent)
-	if err != nil {
-		return fmt.Errorf("failed to serialize task completed event: %w", err)
-	}
-
-	// Create CloudEvent
-	event := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("task-completed-%s", taskID),
-		Source:      "worker-service",
-		SpecVersion: "1.0",
-		Type:        "io.flunq.task.completed",
-		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
-		TaskID:      taskID,
-		Time:        time.Now(),
-		Data:        eventData, // Protobuf serialized data
-	}
-
-	// Publish event
-	if err := p.eventStore.PublishEvent(ctx, event); err != nil {
-		return fmt.Errorf("failed to publish task completed event: %w", err)
-	}
-
-	p.logger.Info("Task completed",
+	p.logger.Warn("publishTaskCompletedEvent is deprecated - task.completed events should come from executor service",
 		"task_id", taskID,
 		"task_name", taskName,
-		"workflow_id", state.WorkflowId,
-		"duration_ms", duration.Milliseconds(),
-		"event_id", event.ID)
+		"workflow_id", state.WorkflowId)
 
+	// Do not publish - executor service handles this
 	return nil
 }
 
@@ -544,6 +536,12 @@ func (p *WorkflowProcessor) publishWorkflowCompletedEvent(ctx context.Context, s
 		"completed_at": time.Now().Format(time.RFC3339),
 	}
 
+	// Get execution ID safely
+	executionID := ""
+	if state.Context != nil {
+		executionID = state.Context.ExecutionId
+	}
+
 	// Create CloudEvent
 	event := &cloudevents.CloudEvent{
 		ID:          uuid.New().String(),
@@ -551,7 +549,7 @@ func (p *WorkflowProcessor) publishWorkflowCompletedEvent(ctx context.Context, s
 		SpecVersion: "1.0",
 		Type:        "io.flunq.workflow.completed",
 		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
+		ExecutionID: executionID,
 		Time:        time.Now(),
 		Data:        eventData,
 	}

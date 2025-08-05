@@ -1,0 +1,103 @@
+{
+  "common": {
+    "loading": "加载中...",
+    "error": "错误",
+    "retry": "重试",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "view": "查看",
+    "close": "关闭",
+    "back": "返回",
+    "next": "下一个",
+    "previous": "上一个",
+    "search": "搜索",
+    "filter": "筛选",
+    "all": "全部",
+    "none": "无",
+    "yes": "是",
+    "no": "否"
+  },
+  "header": {
+    "title": "Flunq.io",
+    "subtitle": "工作流引擎",
+    "toggleTheme": "切换主题"
+  },
+  "navigation": {
+    "workflows": "工作流",
+    "executions": "执行",
+    "api": "API",
+    "settings": "设置"
+  },
+  "workflows": {
+    "title": "工作流",
+    "subtitle": "管理和监控您的无服务器工作流",
+    "noWorkflows": "未找到工作流",
+    "noWorkflowsDescription": "尚未创建任何工作流。",
+    "noWorkflowsFiltered": "没有状态为\"{status}\"的工作流。",
+    "executionCount": "{count} 次执行",
+    "executionCount_plural": "{count} 次执行",
+    "lastExecution": "最后: {time}",
+    "createdTime": "创建于 {time}",
+    "taskSummary": {
+      "completed": "已完成 {count} 个任务: {tasks}",
+      "running": "正在运行的任务: {tasks}",
+      "default": "{count} 个任务: {tasks}"
+    }
+  },
+  "workflowDetail": {
+    "backToWorkflows": "返回工作流",
+    "noDescription": "未提供描述",
+    "status": "状态",
+    "metadata": "元数据",
+    "tasks": "任务 ({count})",
+    "allTasksCompleted": "所有任务已成功完成",
+    "id": "ID:",
+    "created": "创建时间:",
+    "updated": "更新时间:",
+    "executions": "执行次数:",
+    "lastExecution": "最后执行:",
+    "tags": "标签",
+    "notFound": "未找到工作流",
+    "notFoundDescription": "无法找到请求的工作流。"
+  },
+  "eventTimeline": {
+    "title": "事件时间线",
+    "noEvents": "暂无事件",
+    "noEventsDescription": "工作流执行时事件将显示在这里",
+    "failedToLoad": "加载事件失败",
+    "viewEventData": "查看完整事件数据",
+    "taskEvent": "任务事件",
+    "task": "任务:",
+    "type": "类型:",
+    "duration": "持续时间:",
+    "success": "成功",
+    "failed": "失败",
+    "execution": "执行:",
+    "taskId": "任务ID:"
+  },
+  "status": {
+    "pending": "待处理",
+    "running": "运行中",
+    "waiting": "等待中",
+    "suspended": "已暂停",
+    "cancelled": "已取消",
+    "faulted": "出错",
+    "completed": "已完成"
+  },
+  "language": {
+    "select": "选择语言",
+    "english": "English",
+    "french": "Français",
+    "german": "Deutsch",
+    "spanish": "Español",
+    "chinese": "中文",
+    "dutch": "Nederlands"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "系统"
+  }
+}

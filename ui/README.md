@@ -1,6 +1,16 @@
-# UI Service
+# Flunq.io UI
 
-The UI service provides a web-based dashboard for managing workflows, monitoring executions, and designing workflow definitions.
+Modern, minimalistic web dashboard for the Flunq.io workflow engine. Built with Next.js 14, React Query, and Tailwind CSS.
+
+## ✨ Features
+
+- **Workflow Management** - View and monitor all workflows with real-time status updates
+- **Event Timeline** - Detailed event history with interactive timeline visualization
+- **SDL Compliant** - Full support for Serverless Workflow DSL 1.0.0 status types
+- **Real-time Updates** - Automatic refresh of workflow status and events
+- **Dark/Light Mode** - Beautiful theme switching with system preference detection
+- **Responsive Design** - Works perfectly on desktop, tablet, and mobile
+- **Temporal-like Interface** - Familiar, professional workflow monitoring experience
 
 ## 🏗️ Architecture
 

@@ -3,7 +3,6 @@ module github.com/flunq-io/events
 go 1.21
 
 require (
-	github.com/flunq-io/shared v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.5.0
@@ -11,6 +10,8 @@ require (
 	go.uber.org/zap v1.26.0
 	google.golang.org/grpc v1.60.1
 )
+
+require github.com/flunq-io/shared v0.0.0-00010101000000-000000000000
 
 // Local dependencies
 replace github.com/flunq-io/shared => ../shared

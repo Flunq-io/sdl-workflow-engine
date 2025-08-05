@@ -59,6 +59,11 @@ func (r *RedisEventStream) Publish(ctx context.Context, event *cloudevents.Cloud
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
+	// Validate workflow ID to prevent malformed stream names
+	if event.WorkflowID == "" {
+		return fmt.Errorf("cannot publish event with empty workflow ID: event_id=%s, type=%s", event.ID, event.Type)
+	}
+
 	// Create stream key based on workflow ID
 	streamKey := fmt.Sprintf("events:workflow:%s", event.WorkflowID)
 

@@ -54,10 +54,15 @@ type EventPublisher interface {
 ```
 
 ### **Current Implementations**
-- ✅ **RedisStorage** - Redis Streams for persistence
-- ✅ **RedisPublisher** - Redis Pub/Sub for real-time distribution
-- 🚧 **PostgreSQLStorage** - Coming soon
-- 🚧 **KafkaPublisher** - Coming soon
+- ✅ **RedisStorage** - Redis Streams for persistence (`events/internal/storage/redis_storage.go`)
+- ✅ **RedisPublisher** - Redis Pub/Sub for real-time distribution (`events/internal/publisher/redis_publisher.go`)
+- ✅ **Generic Interfaces** - Pluggable backends (`shared/pkg/interfaces/`)
+
+### **Planned Implementations**
+- 🚧 **PostgreSQLStorage** - JSONB-based event storage
+- 🚧 **KafkaPublisher** - High-throughput streaming
+- 🚧 **RabbitMQPublisher** - Message queue with routing
+- 🚧 **MongoDBStorage** - Document-based event storage
 
 ### **Service Connection Patterns**
 

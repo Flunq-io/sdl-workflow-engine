@@ -1,0 +1,103 @@
+{
+  "common": {
+    "loading": "Cargando...",
+    "error": "Error",
+    "retry": "Reintentar",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "view": "Ver",
+    "close": "Cerrar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "previous": "Anterior",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "all": "Todos",
+    "none": "Ninguno",
+    "yes": "Sí",
+    "no": "No"
+  },
+  "header": {
+    "title": "Flunq.io",
+    "subtitle": "Motor de Workflow",
+    "toggleTheme": "Cambiar tema"
+  },
+  "navigation": {
+    "workflows": "Workflows",
+    "executions": "Ejecuciones",
+    "api": "API",
+    "settings": "Configuración"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "subtitle": "Gestiona y monitorea tus workflows serverless",
+    "noWorkflows": "No se encontraron workflows",
+    "noWorkflowsDescription": "Aún no se han creado workflows.",
+    "noWorkflowsFiltered": "No hay workflows con estado \"{status}\".",
+    "executionCount": "{count} ejecución",
+    "executionCount_plural": "{count} ejecuciones",
+    "lastExecution": "Última: {time}",
+    "createdTime": "Creado {time}",
+    "taskSummary": {
+      "completed": "Completadas {count} tareas: {tasks}",
+      "running": "Tareas en ejecución: {tasks}",
+      "default": "{count} tareas: {tasks}"
+    }
+  },
+  "workflowDetail": {
+    "backToWorkflows": "Volver a Workflows",
+    "noDescription": "Sin descripción proporcionada",
+    "status": "Estado",
+    "metadata": "Metadatos",
+    "tasks": "Tareas ({count})",
+    "allTasksCompleted": "Todas las tareas completadas exitosamente",
+    "id": "ID:",
+    "created": "Creado:",
+    "updated": "Actualizado:",
+    "executions": "Ejecuciones:",
+    "lastExecution": "Última ejecución:",
+    "tags": "Etiquetas",
+    "notFound": "Workflow no encontrado",
+    "notFoundDescription": "El workflow solicitado no pudo ser encontrado."
+  },
+  "eventTimeline": {
+    "title": "Línea de Tiempo de Eventos",
+    "noEvents": "Sin eventos",
+    "noEventsDescription": "Los eventos aparecerán aquí cuando se ejecute el workflow",
+    "failedToLoad": "Error al cargar eventos",
+    "viewEventData": "Ver datos completos del evento",
+    "taskEvent": "Evento de Tarea",
+    "task": "Tarea:",
+    "type": "Tipo:",
+    "duration": "Duración:",
+    "success": "Éxito",
+    "failed": "Falló",
+    "execution": "Ejecución:",
+    "taskId": "ID Tarea:"
+  },
+  "status": {
+    "pending": "pendiente",
+    "running": "ejecutando",
+    "waiting": "esperando",
+    "suspended": "suspendido",
+    "cancelled": "cancelado",
+    "faulted": "con error",
+    "completed": "completado"
+  },
+  "language": {
+    "select": "Seleccionar idioma",
+    "english": "English",
+    "french": "Français",
+    "german": "Deutsch",
+    "spanish": "Español",
+    "chinese": "中文",
+    "dutch": "Nederlands"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  }
+}

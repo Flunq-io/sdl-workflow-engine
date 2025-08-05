@@ -97,15 +97,16 @@ message WorkflowState {
   google.protobuf.Timestamp updated_at = 11;
 }
 
-// WorkflowStatus represents the status of a workflow
+// WorkflowStatus represents the status of a workflow (SDL compliant)
 enum WorkflowStatus {
   WORKFLOW_STATUS_UNSPECIFIED = 0;
-  WORKFLOW_STATUS_CREATED = 1;
-  WORKFLOW_STATUS_RUNNING = 2;
-  WORKFLOW_STATUS_COMPLETED = 3;
-  WORKFLOW_STATUS_FAILED = 4;
-  WORKFLOW_STATUS_CANCELLED = 5;
-  WORKFLOW_STATUS_SUSPENDED = 6;
+  WORKFLOW_STATUS_CREATED = 1;      // pending - initiated and pending execution
+  WORKFLOW_STATUS_RUNNING = 2;      // running - currently in progress
+  WORKFLOW_STATUS_COMPLETED = 3;    // completed - ran to completion
+  WORKFLOW_STATUS_FAILED = 4;       // faulted - encountered an error
+  WORKFLOW_STATUS_CANCELLED = 5;    // cancelled - terminated before completion
+  WORKFLOW_STATUS_SUSPENDED = 6;    // suspended - manually paused by user
+  WORKFLOW_STATUS_WAITING = 7;      // waiting - paused, awaiting events or time
 }
 
 // ExecutionContext contains workflow execution context

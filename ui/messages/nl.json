@@ -1,0 +1,103 @@
+{
+  "common": {
+    "loading": "Laden...",
+    "error": "Fout",
+    "retry": "Opnieuw proberen",
+    "cancel": "Annuleren",
+    "save": "Opslaan",
+    "delete": "Verwijderen",
+    "edit": "Bewerken",
+    "view": "Bekijken",
+    "close": "Sluiten",
+    "back": "Terug",
+    "next": "Volgende",
+    "previous": "Vorige",
+    "search": "Zoeken",
+    "filter": "Filter",
+    "all": "Alle",
+    "none": "Geen",
+    "yes": "Ja",
+    "no": "Nee"
+  },
+  "header": {
+    "title": "Flunq.io",
+    "subtitle": "Workflow Engine",
+    "toggleTheme": "Thema wisselen"
+  },
+  "navigation": {
+    "workflows": "Workflows",
+    "executions": "Uitvoeringen",
+    "api": "API",
+    "settings": "Instellingen"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "subtitle": "Beheer en monitor uw serverless workflows",
+    "noWorkflows": "Geen workflows gevonden",
+    "noWorkflowsDescription": "Er zijn nog geen workflows aangemaakt.",
+    "noWorkflowsFiltered": "Geen workflows met status \"{status}\".",
+    "executionCount": "{count} uitvoering",
+    "executionCount_plural": "{count} uitvoeringen",
+    "lastExecution": "Laatste: {time}",
+    "createdTime": "Aangemaakt {time}",
+    "taskSummary": {
+      "completed": "{count} taken voltooid: {tasks}",
+      "running": "Lopende taken: {tasks}",
+      "default": "{count} taken: {tasks}"
+    }
+  },
+  "workflowDetail": {
+    "backToWorkflows": "Terug naar Workflows",
+    "noDescription": "Geen beschrijving beschikbaar",
+    "status": "Status",
+    "metadata": "Metadata",
+    "tasks": "Taken ({count})",
+    "allTasksCompleted": "Alle taken succesvol voltooid",
+    "id": "ID:",
+    "created": "Aangemaakt:",
+    "updated": "Bijgewerkt:",
+    "executions": "Uitvoeringen:",
+    "lastExecution": "Laatste uitvoering:",
+    "tags": "Tags",
+    "notFound": "Workflow niet gevonden",
+    "notFoundDescription": "De gevraagde workflow kon niet worden gevonden."
+  },
+  "eventTimeline": {
+    "title": "Gebeurtenissen Tijdlijn",
+    "noEvents": "Geen gebeurtenissen",
+    "noEventsDescription": "Gebeurtenissen verschijnen hier wanneer de workflow wordt uitgevoerd",
+    "failedToLoad": "Laden van gebeurtenissen mislukt",
+    "viewEventData": "Volledige gebeurtenisgegevens bekijken",
+    "taskEvent": "Taak Gebeurtenis",
+    "task": "Taak:",
+    "type": "Type:",
+    "duration": "Duur:",
+    "success": "Succes",
+    "failed": "Mislukt",
+    "execution": "Uitvoering:",
+    "taskId": "Taak ID:"
+  },
+  "status": {
+    "pending": "in behandeling",
+    "running": "lopend",
+    "waiting": "wachtend",
+    "suspended": "opgeschort",
+    "cancelled": "geannuleerd",
+    "faulted": "fout",
+    "completed": "voltooid"
+  },
+  "language": {
+    "select": "Taal selecteren",
+    "english": "English",
+    "french": "Français",
+    "german": "Deutsch",
+    "spanish": "Español",
+    "chinese": "中文",
+    "dutch": "Nederlands"
+  },
+  "theme": {
+    "light": "Licht",
+    "dark": "Donker",
+    "system": "Systeem"
+  }
+}

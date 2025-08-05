@@ -72,7 +72,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 		Name:        req.Name,
 		Description: req.Description,
 		Definition:  req.Definition,
-		Status:      models.WorkflowStatusCreated,
+		Status:      models.WorkflowStatusPending,
 		Tags:        req.Tags,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -257,9 +257,9 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 		return nil, fmt.Errorf("failed to get workflow: %w", err)
 	}
 
-	// Check if workflow is active
-	if workflow.Status != models.WorkflowStatusActive && workflow.Status != models.WorkflowStatusCreated {
-		return nil, fmt.Errorf("workflow is not active")
+	// Check if workflow can be executed
+	if workflow.Status == models.WorkflowStatusCancelled || workflow.Status == models.WorkflowStatusFaulted {
+		return nil, fmt.Errorf("workflow cannot be executed in %s status", workflow.Status)
 	}
 
 	// Generate execution ID

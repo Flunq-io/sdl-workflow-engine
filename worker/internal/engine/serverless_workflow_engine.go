@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -363,7 +364,19 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			}
 		}
 
-		state.CompletedTasks = append(state.CompletedTasks, completedTask)
+		// Check if this task is already completed to avoid duplicates
+		taskAlreadyCompleted := false
+		for _, existingTask := range state.CompletedTasks {
+			if existingTask.Name == taskName {
+				taskAlreadyCompleted = true
+				break
+			}
+		}
+
+		// Only add if not already completed
+		if !taskAlreadyCompleted {
+			state.CompletedTasks = append(state.CompletedTasks, completedTask)
+		}
 	}
 
 	state.UpdatedAt = timestamppb.New(event.Time)
@@ -438,39 +451,288 @@ func (e *ServerlessWorkflowEngine) processWorkflowFailedEvent(state *gen.Workflo
 	return nil
 }
 
-// GetNextTask determines the next task to execute based on current state using SDK
+// GetNextTask determines the next task to execute based on current state using simple sequential execution
 func (e *ServerlessWorkflowEngine) GetNextTask(ctx context.Context, state *gen.WorkflowState, definition *gen.WorkflowDefinition) (*gen.PendingTask, error) {
-	// For now, return a simple inject task for the current step
-	// TODO: Implement full SDK integration for determining next tasks
+	// Extract ordered task list from DSL
+	taskList, err := e.extractOrderedTaskList(definition)
+	if err != nil {
+		e.logger.Error("Failed to extract task list from DSL", "error", err)
+		return nil, fmt.Errorf("failed to extract task list: %w", err)
+	}
 
 	if state.CurrentStep == "" {
 		state.CurrentStep = definition.StartState
 	}
 
-	// Create a simple task based on current step
+	// Simple sequential execution: completed count = next task index
+	completedCount := len(state.CompletedTasks)
+
+	e.logger.Info("Checking workflow progression",
+		"workflow_id", state.WorkflowId,
+		"completed_tasks", completedCount,
+		"total_tasks", len(taskList),
+		"task_list", taskList,
+		"pending_tasks", len(state.PendingTasks))
+
+	// Check if all tasks are completed
+	if completedCount >= len(taskList) {
+		e.logger.Info("Workflow completed - all tasks done",
+			"workflow_id", state.WorkflowId,
+			"completed_tasks", completedCount,
+			"total_tasks", len(taskList),
+			"task_list", taskList)
+		return nil, nil // No more tasks - workflow complete
+	}
+
+	// Get the next task name
+	nextTaskName := taskList[completedCount]
+
+	e.logger.Debug("Next task determined",
+		"workflow_id", state.WorkflowId,
+		"next_task", nextTaskName,
+		"task_position", fmt.Sprintf("%d/%d", completedCount+1, len(taskList)))
+
+	// Check if this task is already pending
+	for _, pendingTask := range state.PendingTasks {
+		if pendingTask.Name == nextTaskName {
+			e.logger.Debug("Task already pending, not creating duplicate",
+				"task_name", nextTaskName)
+			return nil, nil // Task already pending
+		}
+	}
+
+	// Check if this task is already completed
+	for _, completedTask := range state.CompletedTasks {
+		if completedTask.Name == nextTaskName {
+			e.logger.Debug("Task already completed, not creating duplicate",
+				"task_name", nextTaskName)
+			return nil, nil // Task already completed
+		}
+	}
+
+	// Determine task type from DSL
+	taskType := e.getTaskTypeFromDSL(definition, nextTaskName)
+
+	// Create next task
 	task := &gen.PendingTask{
-		Name:      fmt.Sprintf("%s_task", state.CurrentStep),
-		TaskType:  "set", // Default to set task for now
+		Name:      nextTaskName,
+		TaskType:  taskType,
 		Queue:     "local-queue",
 		CreatedAt: timestamppb.Now(),
 	}
 
-	// Build simple task input
-	taskInput := make(map[string]interface{})
-	taskInput["step_name"] = state.CurrentStep
-	taskInput["inject_data"] = map[string]interface{}{
-		"step_completed": state.CurrentStep,
-		"timestamp":      time.Now().Format(time.RFC3339),
-	}
-
+	// Build task input from DSL
+	taskInput := e.buildTaskInputFromDSL(definition, nextTaskName, state)
 	task.Input, _ = structpb.NewStruct(taskInput)
 
 	e.logger.Debug("Generated next task",
-		"state_name", state.CurrentStep,
 		"task_name", task.Name,
-		"task_type", task.TaskType)
+		"task_type", task.TaskType,
+		"task_position", fmt.Sprintf("%d/%d", completedCount+1, len(taskList)))
 
 	return task, nil
+}
+
+// extractOrderedTaskList extracts tasks from DSL in execution order
+func (e *ServerlessWorkflowEngine) extractOrderedTaskList(definition *gen.WorkflowDefinition) ([]string, error) {
+	if definition.DslDefinition == nil {
+		e.logger.Warn("DSL definition is nil, using fallback task list")
+		return []string{"initialize", "processData", "waitStep", "finalize"}, nil
+	}
+
+	dslMap := definition.DslDefinition.AsMap()
+	e.logger.Info("DEBUG: DSL structure", "dsl_keys", getMapKeys(dslMap))
+
+	// Extract tasks from "do" section (DSL 1.0.0 format)
+	if doSection, ok := dslMap["do"].([]interface{}); ok {
+		e.logger.Info("DEBUG: Found 'do' section", "do_section_length", len(doSection))
+		taskList := make([]string, 0, len(doSection))
+
+		for i, item := range doSection {
+			e.logger.Info("DEBUG: Processing do item", "index", i, "item_type", fmt.Sprintf("%T", item))
+			if taskMap, ok := item.(map[string]interface{}); ok {
+				// Each item in "do" is a map with one key (the task name)
+				for taskName := range taskMap {
+					e.logger.Info("DEBUG: Found task", "task_name", taskName)
+					taskList = append(taskList, taskName)
+					break // Only process first key in each map
+				}
+			} else {
+				e.logger.Warn("DEBUG: Item is not a map", "item", item)
+			}
+		}
+
+		if len(taskList) > 0 {
+			e.logger.Info("Extracted task list from DSL",
+				"task_list", taskList,
+				"count", len(taskList))
+
+			return taskList, nil
+		}
+	} else {
+		e.logger.Warn("DEBUG: No 'do' section found in DSL", "available_keys", getMapKeys(dslMap))
+	}
+
+	// Fallback for basic workflows
+	e.logger.Warn("Could not extract tasks from DSL, using fallback task list")
+	return []string{"initialize", "processData", "waitStep", "finalize"}, nil
+}
+
+// Helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// extractTaskNamesFromDSL extracts task names from the DSL definition
+func (e *ServerlessWorkflowEngine) extractTaskNamesFromDSL(definition *gen.WorkflowDefinition) ([]string, error) {
+	if definition.DslDefinition == nil {
+		return nil, fmt.Errorf("DSL definition is nil")
+	}
+
+	dslMap := definition.DslDefinition.AsMap()
+
+	// Extract tasks from "do" section (DSL 1.0.0 format)
+	if doSection, ok := dslMap["do"].([]interface{}); ok {
+		taskNames := make([]string, 0, len(doSection))
+
+		for _, item := range doSection {
+			if taskMap, ok := item.(map[string]interface{}); ok {
+				// Each item in "do" is a map with one key (the task name)
+				for taskName := range taskMap {
+					taskNames = append(taskNames, taskName)
+					break // Only take the first (and should be only) key
+				}
+			}
+		}
+
+		e.logger.Debug("Extracted task names from DSL",
+			"task_names", taskNames,
+			"count", len(taskNames))
+
+		return taskNames, nil
+	}
+
+	// Fallback for other DSL formats or if "do" section not found
+	return []string{"initialize", "processData", "waitStep", "finalize"}, nil
+}
+
+// getTaskTypeFromDSL determines the task type from DSL definition
+func (e *ServerlessWorkflowEngine) getTaskTypeFromDSL(definition *gen.WorkflowDefinition, taskName string) string {
+	if definition.DslDefinition == nil {
+		return "set" // Default fallback
+	}
+
+	dslMap := definition.DslDefinition.AsMap()
+
+	// Look for the task in "do" section
+	if doSection, ok := dslMap["do"].([]interface{}); ok {
+		for _, item := range doSection {
+			if taskMap, ok := item.(map[string]interface{}); ok {
+				if taskDef, exists := taskMap[taskName]; exists {
+					if taskDefMap, ok := taskDef.(map[string]interface{}); ok {
+						// Check what type of task this is
+						if _, hasSet := taskDefMap["set"]; hasSet {
+							return "set"
+						}
+						if _, hasWait := taskDefMap["wait"]; hasWait {
+							return "wait"
+						}
+						if _, hasCall := taskDefMap["call"]; hasCall {
+							return "call"
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "set" // Default fallback
+}
+
+// buildTaskInputFromDSL builds task input from DSL definition
+func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.WorkflowDefinition, taskName string, state *gen.WorkflowState) map[string]interface{} {
+	taskInput := make(map[string]interface{})
+
+	// Add basic task information
+	taskInput["task_name"] = taskName
+	taskInput["workflow_id"] = state.WorkflowId
+	taskInput["timestamp"] = time.Now().Format(time.RFC3339)
+
+	// Try to extract task-specific configuration from DSL
+	if definition.DslDefinition != nil {
+		dslMap := definition.DslDefinition.AsMap()
+
+		if doSection, ok := dslMap["do"].([]interface{}); ok {
+			for _, item := range doSection {
+				if taskMap, ok := item.(map[string]interface{}); ok {
+					if taskDef, exists := taskMap[taskName]; exists {
+						taskInput["task_definition"] = taskDef
+
+						// Extract task-specific parameters
+						if taskDefMap, ok := taskDef.(map[string]interface{}); ok {
+							// Handle wait task duration
+							if waitConfig, hasWait := taskDefMap["wait"]; hasWait {
+								if waitMap, ok := waitConfig.(map[string]interface{}); ok {
+									if duration, hasDuration := waitMap["duration"]; hasDuration {
+										if durationStr, ok := duration.(string); ok {
+											// Convert ISO 8601 duration (PT2S) to Go duration (2s)
+											goDuration := e.convertISO8601ToGoDuration(durationStr)
+											taskInput["duration"] = goDuration
+
+											e.logger.Debug("Extracted wait duration",
+												"task_name", taskName,
+												"iso8601_duration", durationStr,
+												"go_duration", goDuration)
+										}
+									}
+								}
+							}
+
+							// Handle set task parameters
+							if setConfig, hasSet := taskDefMap["set"]; hasSet {
+								taskInput["set_data"] = setConfig
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return taskInput
+}
+
+// convertISO8601ToGoDuration converts ISO 8601 duration (PT2S) to Go duration (2s)
+func (e *ServerlessWorkflowEngine) convertISO8601ToGoDuration(iso8601Duration string) string {
+	// Simple conversion for common cases
+	// PT2S -> 2s, PT30S -> 30s, PT1M -> 1m, PT1H -> 1h
+
+	if len(iso8601Duration) < 3 || !strings.HasPrefix(iso8601Duration, "PT") {
+		return "1s" // Default fallback
+	}
+
+	// Remove "PT" prefix
+	duration := iso8601Duration[2:]
+
+	// Convert common patterns
+	if strings.HasSuffix(duration, "S") {
+		// PT2S -> 2s
+		return strings.ToLower(duration)
+	} else if strings.HasSuffix(duration, "M") {
+		// PT1M -> 1m
+		return strings.ToLower(duration)
+	} else if strings.HasSuffix(duration, "H") {
+		// PT1H -> 1h
+		return strings.ToLower(duration)
+	}
+
+	// Fallback
+	return "1s"
 }
 
 // TODO: Implement full Serverless Workflow SDK integration
@@ -584,11 +846,22 @@ func (e *ServerlessWorkflowEngine) IsWorkflowComplete(ctx context.Context, state
 	// Workflow is complete if status is completed or failed
 	if state.Status == gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED ||
 		state.Status == gen.WorkflowStatus_WORKFLOW_STATUS_FAILED {
+		e.logger.Info("Workflow complete due to status",
+			"workflow_id", state.WorkflowId,
+			"status", state.Status)
 		return true
 	}
 
-	// Check if current state is an end state
+	// For DSL 1.0.0 format, don't use state-based completion logic
+	// Let GetNextTask() handle completion by returning nil when no more tasks
 	dslMap := definition.DslDefinition.AsMap()
+	if _, hasDoSection := dslMap["do"]; hasDoSection {
+		e.logger.Debug("DSL 1.0.0 detected - using task-based completion logic",
+			"workflow_id", state.WorkflowId)
+		return false // Let GetNextTask() determine completion
+	}
+
+	// Legacy DSL 0.8 format - check if current state is an end state
 	if states, exists := dslMap["states"]; exists {
 		if statesArray, ok := states.([]interface{}); ok {
 			for _, stateInterface := range statesArray {
@@ -596,6 +869,9 @@ func (e *ServerlessWorkflowEngine) IsWorkflowComplete(ctx context.Context, state
 					if name, exists := stateMap["name"]; exists && name == state.CurrentStep {
 						if end, exists := stateMap["end"]; exists {
 							if endBool, ok := end.(bool); ok && endBool {
+								e.logger.Info("Workflow complete due to end state",
+									"workflow_id", state.WorkflowId,
+									"current_step", state.CurrentStep)
 								return true
 							}
 						}
@@ -605,5 +881,9 @@ func (e *ServerlessWorkflowEngine) IsWorkflowComplete(ctx context.Context, state
 		}
 	}
 
+	e.logger.Debug("Workflow not complete",
+		"workflow_id", state.WorkflowId,
+		"status", state.Status,
+		"current_step", state.CurrentStep)
 	return false
 }

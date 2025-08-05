@@ -1,0 +1,132 @@
+{
+  "common": {
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "retry": "Réessayer",
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "view": "Voir",
+    "close": "Fermer",
+    "back": "Retour",
+    "next": "Suivant",
+    "previous": "Précédent",
+    "search": "Rechercher",
+    "filter": "Filtrer",
+    "all": "Tous",
+    "none": "Aucun",
+    "yes": "Oui",
+    "no": "Non"
+  },
+  "header": {
+    "title": "Flunq.io",
+    "subtitle": "Moteur de Workflow",
+    "toggleTheme": "Changer le thème"
+  },
+  "navigation": {
+    "workflows": "Workflows",
+    "executions": "Exécutions",
+    "api": "API",
+    "settings": "Paramètres"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "subtitle": "Gérez et surveillez vos workflows serverless",
+    "noWorkflows": "Aucun workflow trouvé",
+    "noWorkflowsDescription": "Aucun workflow n'a encore été créé.",
+    "noWorkflowsFiltered": "Aucun workflow avec le statut \"{status}\".",
+    "executionCount": "{count} exécution",
+    "executionCount_plural": "{count} exécutions",
+    "lastExecution": "Dernière: {time}",
+    "createdTime": "Créé {time}",
+    "taskSummary": {
+      "completed": "Terminé {count} tâches: {tasks}",
+      "running": "Tâches en cours: {tasks}",
+      "default": "{count} tâches: {tasks}"
+    }
+  },
+  "workflowDetail": {
+    "backToWorkflows": "Retour aux Workflows",
+    "noDescription": "Aucune description fournie",
+    "status": "Statut",
+    "metadata": "Métadonnées",
+    "tasks": "Tâches ({count})",
+    "allTasksCompleted": "Toutes les tâches terminées avec succès",
+    "id": "ID:",
+    "created": "Créé:",
+    "updated": "Mis à jour:",
+    "executions": "Exécutions:",
+    "lastExecution": "Dernière exécution:",
+    "tags": "Tags",
+    "notFound": "Workflow non trouvé",
+    "notFoundDescription": "Le workflow demandé n'a pas pu être trouvé."
+  },
+  "eventTimeline": {
+    "title": "Chronologie des Événements",
+    "noEvents": "Aucun événement",
+    "noEventsDescription": "Les événements apparaîtront ici lors de l'exécution du workflow",
+    "failedToLoad": "Échec du chargement des événements",
+    "viewEventData": "Voir les données complètes de l'événement",
+    "taskEvent": "Événement de Tâche",
+    "task": "Tâche:",
+    "type": "Type:",
+    "duration": "Durée:",
+    "success": "Succès",
+    "failed": "Échec",
+    "execution": "Exécution:",
+    "taskId": "ID Tâche:"
+  },
+  "status": {
+    "pending": "en attente",
+    "running": "en cours",
+    "waiting": "en attente",
+    "suspended": "suspendu",
+    "cancelled": "annulé",
+    "faulted": "en erreur",
+    "completed": "terminé"
+  },
+  "language": {
+    "select": "Sélectionner la langue",
+    "english": "English",
+    "french": "Français",
+    "german": "Deutsch",
+    "spanish": "Español",
+    "chinese": "中文",
+    "dutch": "Nederlands"
+  },
+  "theme": {
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  },
+  "api": {
+    "title": "Documentation API",
+    "subtitle": "Explorez et interagissez avec l'API REST Flunq.io",
+    "swagger": {
+      "title": "Documentation Swagger",
+      "description": "Référence API complète avec exemples interactifs et schémas de requête/réponse.",
+      "openDocs": "Ouvrir dans un nouvel onglet"
+    },
+    "endpoints": {
+      "title": "Points de terminaison API",
+      "listWorkflows": "Lister tous les workflows",
+      "getWorkflow": "Obtenir les détails du workflow",
+      "createWorkflow": "Créer un nouveau workflow",
+      "deleteWorkflow": "Supprimer le workflow",
+      "getEvents": "Obtenir les événements du workflow",
+      "executeWorkflow": "Exécuter le workflow"
+    },
+    "view": {
+      "cards": "Cartes",
+      "table": "Tableau"
+    },
+    "table": {
+      "method": "Méthode",
+      "endpoint": "Point de terminaison",
+      "description": "Description",
+      "parameters": "Paramètres",
+      "response": "Réponse"
+    }
+  }
+}
