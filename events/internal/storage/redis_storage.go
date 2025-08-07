@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -11,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/events/internal/interfaces"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // RedisStorage implements EventStorage using Redis Streams
@@ -50,8 +51,22 @@ func (r *RedisStorage) Store(ctx context.Context, event *cloudevents.CloudEvent)
 		eventDataStr = string(eventDataBytes)
 	}
 
-	// Create stream key based on workflow ID
-	streamKey := fmt.Sprintf("events:workflow:%s", event.WorkflowID)
+	// Create stream key based on execution ID (execution-only approach with multi-tenancy)
+	var streamKey string
+	if event.ExecutionID != "" && strings.TrimSpace(event.ExecutionID) != "" {
+		// Execution-related events go to tenant-specific execution streams
+		if event.TenantID != "" && strings.TrimSpace(event.TenantID) != "" {
+			streamKey = fmt.Sprintf("events:execution:%s:%s", event.TenantID, event.ExecutionID)
+		} else {
+			// Fallback for events without tenant ID (backward compatibility)
+			streamKey = fmt.Sprintf("events:execution:%s", event.ExecutionID)
+		}
+		r.logger.Info("DEBUG: Using execution stream", zap.String("stream_key", streamKey), zap.String("tenant_id", event.TenantID), zap.String("execution_id", event.ExecutionID))
+	} else {
+		// Workflow-level events (creation, deletion, etc.) should not create streams
+		// These are just metadata operations and don't need event streams
+		return fmt.Errorf("workflow-level events should not be stored in event streams - execution_id is required")
+	}
 
 	// Store in Redis Stream
 	args := &redis.XAddArgs{
@@ -86,10 +101,50 @@ func (r *RedisStorage) Store(ctx context.Context, event *cloudevents.CloudEvent)
 	return nil
 }
 
-// GetHistory retrieves all events for a workflow
+// GetHistory retrieves all events for a workflow (backward compatibility)
 func (r *RedisStorage) GetHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
 	streamKey := fmt.Sprintf("events:workflow:%s", workflowID)
+	return r.getEventsFromStream(ctx, streamKey)
+}
 
+// GetExecutionHistory retrieves all events for a specific execution
+func (r *RedisStorage) GetExecutionHistory(ctx context.Context, executionID string) ([]*cloudevents.CloudEvent, error) {
+	streamKey := fmt.Sprintf("events:execution:%s", executionID)
+	return r.getEventsFromStream(ctx, streamKey)
+}
+
+// GetWorkflowExecutions retrieves all execution IDs for a workflow
+func (r *RedisStorage) GetWorkflowExecutions(ctx context.Context, workflowID string) ([]string, error) {
+	// Search for all execution streams that belong to this workflow
+	pattern := "events:execution:*"
+	keys, err := r.client.Keys(ctx, pattern).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to search execution streams: %w", err)
+	}
+
+	var executionIDs []string
+	for _, key := range keys {
+		// Extract execution ID from key (events:execution:{executionID})
+		if len(key) > 17 { // len("events:execution:") = 17
+			executionID := key[17:]
+
+			// Check if this execution belongs to the workflow by reading the first event
+			firstEvent, err := r.getFirstEventFromStream(ctx, key)
+			if err != nil {
+				continue // Skip if we can't read the stream
+			}
+
+			if firstEvent != nil && firstEvent.WorkflowID == workflowID {
+				executionIDs = append(executionIDs, executionID)
+			}
+		}
+	}
+
+	return executionIDs, nil
+}
+
+// getEventsFromStream is a helper method to read events from any stream
+func (r *RedisStorage) getEventsFromStream(ctx context.Context, streamKey string) ([]*cloudevents.CloudEvent, error) {
 	// Read all events from the stream
 	result, err := r.client.XRange(ctx, streamKey, "-", "+").Result()
 	if err != nil {
@@ -109,6 +164,16 @@ func (r *RedisStorage) GetHistory(ctx context.Context, workflowID string) ([]*cl
 	}
 
 	return events, nil
+}
+
+// getFirstEventFromStream gets the first event from a stream (for workflow ID lookup)
+func (r *RedisStorage) getFirstEventFromStream(ctx context.Context, streamKey string) (*cloudevents.CloudEvent, error) {
+	result, err := r.client.XRange(ctx, streamKey, "-", "+").Result()
+	if err != nil || len(result) == 0 {
+		return nil, err
+	}
+
+	return r.parseEventFromMessage(result[0])
 }
 
 // GetSince retrieves events for a workflow since a specific version/timestamp

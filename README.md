@@ -5,22 +5,25 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 ## 🏗️ Architecture
 
 ```
-    API Service ──┐
-                  │
-    Worker ───────┤
-                  │     ┌─────────────────────┐
-    Executor ─────┼────►│   Event Store       │────► All Services
-                  │     │   (Central Hub)     │      (Subscribers)
-    UI Service ───┤     │                     │
-                  │     │ ┌─────────────────┐ │
-    Other ────────┘     │ │ Event Router    │ │
-    Services            │ │ WebSocket/gRPC  │ │
-                        │ └─────────────────┘ │
-                        │ ┌─────────────────┐ │
-                        │ │ Event Storage   │ │
-                        │ │ (Redis Streams) │ │
-                        │ └─────────────────┘ │
-                        └─────────────────────┘
+┌─────────────┐    ┌─────────────────┐    ┌─────────────┐
+│   API       │───▶│  EventStore     │◀───│   Worker    │
+│   Service   │    │  Interface      │    │   Service   │
+└─────────────┘    │                 │    └─────────────┘
+                   │ ┌─────────────┐ │
+┌─────────────┐    │ │Redis Streams│ │    ┌─────────────┐
+│  Executor   │───▶│ │ (current)   │ │◀───│ UI Service  │
+│  Service    │    │ └─────────────┘ │    └─────────────┘
+└─────────────┘    │                 │
+                   │ ┌─────────────┐ │
+                   │ │   Kafka     │ │
+                   │ │  (future)   │ │
+                   │ └─────────────┘ │
+                   │                 │
+                   │ ┌─────────────┐ │
+                   │ │ RabbitMQ    │ │
+                   │ │  (future)   │ │
+                   │ └─────────────┘ │
+                   └─────────────────┘
 ```
 
 ## 🚀 Services
@@ -30,10 +33,10 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 - **Purpose**: HTTP API server, DSL parsing, workflow orchestration
 - **Features**: REST/GraphQL endpoints, workflow validation, execution control
 
-### **Event Store Service** (`/events`)
+### **EventStore Library** (`/worker/pkg/eventstore`)
 - **Language**: Go
-- **Purpose**: Centralized event hub - the nervous system of the workflow engine
-- **Features**: CloudEvents storage, real-time distribution, subscriber management, event replay
+- **Purpose**: Pluggable event storage and streaming - the nervous system of the workflow engine
+- **Features**: Event sourcing, Temporal-level resilience, pluggable backends (Redis/Kafka/RabbitMQ)
 
 ### **Worker Service** (`/worker`)
 - **Language**: Go  
@@ -62,21 +65,28 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 - **Deployment**: Docker, Kubernetes
 - **Monitoring**: OpenTelemetry, Prometheus
 
-## 🔌 Generic Interfaces
+## 🔌 EventStore Interface
 
-Flunq.io is built with pluggable backends through generic interfaces:
+Flunq.io uses a unified EventStore interface for maximum flexibility:
 
-### **Event Storage** (`shared/pkg/interfaces/event_storage.go`)
-- **Redis** (current) - Redis Streams for high-performance event storage
-- **PostgreSQL** (planned) - JSONB columns for event data
-- **MongoDB** (planned) - Document-based event storage
-- **EventStore DB** (planned) - Purpose-built event store
+### **EventStore Interface** (`worker/pkg/eventstore/interface.go`)
+```go
+type EventStore interface {
+    Publish(ctx context.Context, stream string, event *CloudEvent) error
+    Subscribe(ctx context.Context, config SubscriptionConfig) (<-chan *CloudEvent, <-chan error, error)
+    ReadHistory(ctx context.Context, stream string, fromID string) ([]*CloudEvent, error)
+    CreateConsumerGroup(ctx context.Context, groupName string, streams []string) error
+    CreateCheckpoint(ctx context.Context, groupName, stream, messageID string) error
+    GetLastCheckpoint(ctx context.Context, groupName, stream string) (string, error)
+    Close() error
+}
+```
 
-### **Event Streaming** (`shared/pkg/interfaces/event_streaming.go`)
-- **Redis Streams** (current) - Built-in Redis streaming
-- **Kafka** (planned) - High-throughput distributed streaming
-- **RabbitMQ** (planned) - Message queue with routing
-- **NATS** (planned) - Lightweight cloud-native messaging
+### **Current Implementations**
+- **✅ Redis EventStore** (`worker/pkg/eventstore/redis/`) - Redis Streams with consumer groups
+- **🚧 Kafka EventStore** (planned) - High-throughput distributed streaming
+- **🚧 RabbitMQ EventStore** (planned) - Message queue with advanced routing
+- **🚧 PostgreSQL EventStore** (planned) - JSONB-based event storage
 
 ### **Database** (`shared/pkg/interfaces/database.go`)
 - **Redis** (current) - JSON-serialized workflow state and task data
@@ -98,7 +108,6 @@ docker-compose up -d
 
 # Or start individual services
 cd api && go run main.go
-cd events && go run main.go
 cd worker && go run main.go
 cd executor && go run main.go
 cd ui && npm run dev
@@ -119,7 +128,7 @@ See individual service READMEs for detailed setup instructions.
 - [x] **Core DSL parser and validator** - Supports DSL 1.0.0 (YAML) and 0.8 (JSON)
 - [x] **Redis-based event streaming** - CloudEvents compliant with Redis Streams
 - [x] **Basic workflow execution engine** - Full task execution pipeline
-- [x] **Event Store architecture** - Centralized event hub with real-time distribution
+- [x] **EventStore architecture** - Unified interface with pluggable backends (Redis/Kafka/RabbitMQ)
 - [x] **Enhanced I/O storage** - Complete workflow and task input/output data storage
 - [x] **Generic interfaces** - Pluggable storage and streaming backends
 - [x] **Multi-tenant support** - Tenant isolation across all services
@@ -129,7 +138,7 @@ See individual service READMEs for detailed setup instructions.
 
 - [ ] **Protobuf serialization** - Replace JSON with binary protobuf for performance
 - [ ] **PostgreSQL/MongoDB storage** - Alternative database implementations
-- [ ] **Kafka/RabbitMQ streaming** - Alternative event streaming implementations
+- [ ] **Kafka/RabbitMQ EventStore** - Alternative EventStore backend implementations
 - [ ] **Advanced DSL features** - Parallel, switch, try/catch task types
 - [ ] **REST API endpoints** - Complete CRUD operations for workflows
 - [ ] **Advanced monitoring** - OpenTelemetry, Prometheus, distributed tracing

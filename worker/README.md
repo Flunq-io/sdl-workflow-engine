@@ -1,6 +1,6 @@
 # Worker Service
 
-The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration.
+The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration with **Temporal-level resilience** through the unified EventStore interface.
 
 ## 🚀 Features
 
@@ -9,6 +9,13 @@ The Worker service executes Serverless Workflow DSL using the official Serverles
 - ✅ **SDL Task Types**: Supports call, run, for, if, switch, try, emit, wait, set tasks
 - ✅ **SDK Validation**: Leverages SDK's built-in validation and workflow model
 - ✅ **State Management**: Uses SDK's workflow execution engine as foundation
+
+### **EventStore Integration**
+- ✅ **Unified Interface**: Uses pluggable EventStore interface for maximum flexibility
+- ✅ **Redis Implementation**: Current backend using Redis Streams with consumer groups
+- ✅ **Future Backends**: Easy switching to Kafka, RabbitMQ, PostgreSQL via configuration
+- ✅ **Event Sourcing**: Complete event history with deterministic state rebuilding
+- ✅ **Temporal-level Resilience**: Crash recovery, horizontal scaling, time travel debugging
 
 ### **Core Event Processing Pattern**
 Every workflow event triggers this exact sequence:
@@ -26,10 +33,11 @@ Every workflow event triggers this exact sequence:
 - 🚧 **Binary Protobuf**: Planned migration to binary protobuf for performance
 
 ### **Generic Interface Architecture**
-- ✅ **EventStore Interface**: Switch between Redis, Kafka, EventStore DB
+- ✅ **EventStore Interface**: Switch between Redis, Kafka, RabbitMQ, PostgreSQL
 - ✅ **Database Interface**: Switch between Redis, PostgreSQL, MongoDB
 - ✅ **WorkflowEngine Interface**: Pluggable workflow execution engines
 - ✅ **Circuit Breaker**: Resilient EventStore calls with failure handling
+- ✅ **Configuration-Driven**: Backend selection via environment variables
 
 ## 🏗️ Architecture
 
@@ -92,7 +100,7 @@ Environment variables:
 - `WORKER_ID`: Unique worker identifier
 - `CONCURRENCY`: Number of concurrent workflows (default: 10)
 - `REDIS_URL`: Redis connection string
-- `EVENTS_URL`: Events service URL
+- `EVENTSTORE_TYPE`: EventStore backend type (redis, kafka, rabbitmq)
 - `EXECUTOR_URL`: Executor service URL
 - `LOG_LEVEL`: Logging level
 
@@ -105,7 +113,7 @@ go mod tidy
 # Build the service
 go build -o bin/worker cmd/server/main.go
 
-# Run the service (requires Event Store and Redis)
+# Run the service (requires Redis)
 ./bin/worker
 go run cmd/server/main.go
 
@@ -115,7 +123,7 @@ go test ./internal/processor -v
 # Test all components
 go test ./... -v
 
-# Run example (requires Event Store service)
+# Run example (requires Redis)
 go run examples/worker-example.go
 ```
 

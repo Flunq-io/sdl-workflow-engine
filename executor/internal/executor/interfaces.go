@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // TaskExecutor defines the interface for executing different task types
@@ -68,12 +68,24 @@ func ParseTaskRequestFromEvent(event *cloudevents.CloudEvent) (*TaskRequest, err
 	fmt.Printf("\n")
 	fmt.Printf("DEBUG: task_type value: '%v' (type: %T)\n", data["task_type"], data["task_type"])
 
+	// Extract execution_id from data payload as fallback
+	executionID := event.ExecutionID
+	if executionID == "" {
+		executionID = getStringFromData(data, "execution_id")
+	}
+
+	// Extract workflow_id from data payload as fallback
+	workflowID := event.WorkflowID
+	if workflowID == "" {
+		workflowID = getStringFromData(data, "workflow_id")
+	}
+
 	request := &TaskRequest{
 		TaskID:      getStringFromData(data, "task_id"),
 		TaskName:    getStringFromData(data, "task_name"),
 		TaskType:    getStringFromData(data, "task_type"),
-		WorkflowID:  event.WorkflowID,
-		ExecutionID: event.ExecutionID,
+		WorkflowID:  workflowID,
+		ExecutionID: executionID,
 	}
 
 	// Debug: Check if WorkflowID is empty

@@ -16,6 +16,9 @@ type EventStream interface {
 	// Publish an event to the stream
 	Publish(ctx context.Context, event *cloudevents.CloudEvent) error
 
+	// GetEventHistory retrieves all events for a specific workflow
+	GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error)
+
 	// CreateConsumerGroup creates a consumer group
 	CreateConsumerGroup(ctx context.Context, groupName string) error
 
@@ -66,14 +69,14 @@ type StreamInfo struct {
 
 // StreamConfig represents stream configuration
 type StreamConfig struct {
-	Type           string            `json:"type"`             // redis, kafka, rabbitmq, nats, etc.
-	Brokers        []string          `json:"brokers"`          // Broker addresses
-	Topic          string            `json:"topic"`            // Topic/stream name
-	ConsumerGroup  string            `json:"consumer_group"`   // Consumer group
-	ConsumerName   string            `json:"consumer_name"`    // Consumer name
-	Options        map[string]string `json:"options"`          // Additional stream-specific options
-	RetryPolicy    *RetryPolicy      `json:"retry_policy"`     // Retry configuration
-	DeadLetterTopic string           `json:"dead_letter_topic"` // Dead letter topic for failed messages
+	Type            string            `json:"type"`              // redis, kafka, rabbitmq, nats, etc.
+	Brokers         []string          `json:"brokers"`           // Broker addresses
+	Topic           string            `json:"topic"`             // Topic/stream name
+	ConsumerGroup   string            `json:"consumer_group"`    // Consumer group
+	ConsumerName    string            `json:"consumer_name"`     // Consumer name
+	Options         map[string]string `json:"options"`           // Additional stream-specific options
+	RetryPolicy     *RetryPolicy      `json:"retry_policy"`      // Retry configuration
+	DeadLetterTopic string            `json:"dead_letter_topic"` // Dead letter topic for failed messages
 }
 
 // RetryPolicy defines retry behavior for stream operations

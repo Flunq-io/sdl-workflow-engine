@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/events/internal/subscriber"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // HTTPHandler handles HTTP requests for the Event Store
@@ -136,6 +136,50 @@ func (h *HTTPHandler) GetStreamEvents(c *gin.Context) {
 	})
 }
 
+// GetExecutionHistory handles GET /api/v1/executions/:executionId/events
+func (h *HTTPHandler) GetExecutionHistory(c *gin.Context) {
+	executionID := c.Param("executionId")
+	if executionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "execution_id is required"})
+		return
+	}
+
+	events, err := h.cloudEventsHandler.GetExecutionHistory(c.Request.Context(), executionID)
+	if err != nil {
+		h.logger.Error("Failed to get execution history", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get execution history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"execution_id": executionID,
+		"events":       events,
+		"count":        len(events),
+	})
+}
+
+// GetWorkflowExecutions handles GET /api/v1/workflows/:workflowId/executions
+func (h *HTTPHandler) GetWorkflowExecutions(c *gin.Context) {
+	workflowID := c.Param("workflowId")
+	if workflowID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id is required"})
+		return
+	}
+
+	executionIDs, err := h.cloudEventsHandler.GetWorkflowExecutions(c.Request.Context(), workflowID)
+	if err != nil {
+		h.logger.Error("Failed to get workflow executions", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow executions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"workflow_id":   workflowID,
+		"execution_ids": executionIDs,
+		"count":         len(executionIDs),
+	})
+}
+
 // CreateSubscription handles POST /api/v1/subscriptions
 func (h *HTTPHandler) CreateSubscription(c *gin.Context) {
 	var subscription subscriber.Subscription
@@ -148,8 +192,8 @@ func (h *HTTPHandler) CreateSubscription(c *gin.Context) {
 	h.subscriberManager.CreateSubscription(&subscription)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message":       "Subscription created successfully",
-		"subscription":  subscription,
+		"message":      "Subscription created successfully",
+		"subscription": subscription,
 	})
 }
 

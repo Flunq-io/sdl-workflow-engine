@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/events/internal/subscriber"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // GRPCHandler handles gRPC requests for the Event Store

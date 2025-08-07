@@ -17,11 +17,23 @@
     "all": "Tous",
     "none": "Aucun",
     "yes": "Oui",
-    "no": "Non"
+    "no": "Non",
+    "name": "Nom",
+    "status": "Statut",
+    "tasks": "Tâches",
+    "created": "Créé",
+    "executions": "Exécutions",
+    "execution": "Exécution",
+    "workflow": "Workflow",
+    "started": "Démarré",
+    "duration": "Durée",
+    "actions": "Actions",
+    "cards": "Cartes",
+    "table": "Tableau"
   },
   "header": {
     "title": "Flunq.io",
-    "subtitle": "Moteur de Workflow",
+    "subtitle": "Moniteur d'Exécution",
     "toggleTheme": "Changer le thème"
   },
   "navigation": {
@@ -45,6 +57,19 @@
       "running": "Tâches en cours: {tasks}",
       "default": "{count} tâches: {tasks}"
     }
+  },
+  "executions": {
+    "title": "Exécutions de Workflow",
+    "subtitle": "Surveillez et suivez vos instances d'exécution de workflow",
+    "noExecutions": "Aucune exécution trouvée",
+    "noExecutionsDescription": "Aucune exécution de workflow n'a encore été démarrée.",
+    "noExecutionsFiltered": "Aucune exécution avec le statut \"{status}\".",
+    "executionId": "ID d'Exécution",
+    "workflowName": "Workflow",
+    "currentStep": "Étape Actuelle",
+    "startedAt": "Démarré",
+    "duration": "Durée",
+    "viewDetails": "Voir les Détails"
   },
   "workflowDetail": {
     "backToWorkflows": "Retour aux Workflows",

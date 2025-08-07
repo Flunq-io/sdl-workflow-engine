@@ -14,10 +14,212 @@ import (
 
 	"github.com/flunq-io/api/internal/handlers"
 	"github.com/flunq-io/api/internal/middleware"
+	"github.com/flunq-io/api/internal/models"
 	"github.com/flunq-io/api/internal/repository"
 	"github.com/flunq-io/api/internal/services"
-	"github.com/flunq-io/events/pkg/client"
+	"github.com/flunq-io/shared/pkg/eventstreaming"
+	"github.com/flunq-io/shared/pkg/interfaces"
+	"github.com/flunq-io/shared/pkg/storage"
 )
+
+// LoggerAdapter adapts zap.Logger to eventstore.Logger interface
+type LoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (l *LoggerAdapter) Debug(msg string, keysAndValues ...interface{}) {
+	l.logger.Debug(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *LoggerAdapter) Info(msg string, keysAndValues ...interface{}) {
+	l.logger.Info(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *LoggerAdapter) Warn(msg string, keysAndValues ...interface{}) {
+	l.logger.Warn(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *LoggerAdapter) Error(msg string, keysAndValues ...interface{}) {
+	l.logger.Error(msg, convertToZapFields(keysAndValues...)...)
+}
+
+// DatabaseLoggerAdapter adapts zap.Logger to interfaces.Logger interface
+type DatabaseLoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (l *DatabaseLoggerAdapter) Debug(msg string, keysAndValues ...interface{}) {
+	l.logger.Debug(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Info(msg string, keysAndValues ...interface{}) {
+	l.logger.Info(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Warn(msg string, keysAndValues ...interface{}) {
+	l.logger.Warn(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Error(msg string, keysAndValues ...interface{}) {
+	l.logger.Error(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Fatal(msg string, keysAndValues ...interface{}) {
+	l.logger.Fatal(msg, convertToZapFields(keysAndValues...)...)
+}
+
+func (l *DatabaseLoggerAdapter) With(keysAndValues ...interface{}) interfaces.Logger {
+	return &DatabaseLoggerAdapter{logger: l.logger.With(convertToZapFields(keysAndValues...)...)}
+}
+
+// WorkflowRepositoryAdapter adapts Database interface to WorkflowRepository interface
+// TODO: Remove this when ExecutionService is updated to use shared interfaces
+type WorkflowRepositoryAdapter struct {
+	database interfaces.Database
+}
+
+func (w *WorkflowRepositoryAdapter) Create(ctx context.Context, workflow *models.Workflow) error {
+	// Convert to shared WorkflowDefinition
+	sharedWorkflow := &interfaces.WorkflowDefinition{
+		ID:          workflow.ID,
+		Name:        workflow.Name,
+		Description: workflow.Description,
+		Version:     "1.0.0",
+		SpecVersion: "1.0.0",
+		Definition:  workflow.Definition,
+		CreatedAt:   workflow.CreatedAt,
+		UpdatedAt:   workflow.UpdatedAt,
+		CreatedBy:   "api",
+		TenantID:    workflow.TenantID,
+	}
+	return w.database.CreateWorkflow(ctx, sharedWorkflow)
+}
+
+func (w *WorkflowRepositoryAdapter) GetByID(ctx context.Context, id string) (*models.WorkflowDetail, error) {
+	sharedWorkflow, err := w.database.GetWorkflowDefinition(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert back to API model
+	workflow := &models.Workflow{
+		ID:          sharedWorkflow.ID,
+		Name:        sharedWorkflow.Name,
+		Description: sharedWorkflow.Description,
+		TenantID:    sharedWorkflow.TenantID,
+		Definition:  sharedWorkflow.Definition,
+		Status:      models.WorkflowStatusPending,
+		Tags:        []string{},
+		CreatedAt:   sharedWorkflow.CreatedAt,
+		UpdatedAt:   sharedWorkflow.UpdatedAt,
+	}
+
+	return &models.WorkflowDetail{
+		Workflow:       *workflow,
+		ExecutionCount: 0,
+		LastExecution:  nil,
+		Input:          nil,
+		Output:         nil,
+		TaskExecutions: nil,
+	}, nil
+}
+
+func (w *WorkflowRepositoryAdapter) Update(ctx context.Context, workflow *models.Workflow) error {
+	sharedWorkflow := &interfaces.WorkflowDefinition{
+		ID:          workflow.ID,
+		Name:        workflow.Name,
+		Description: workflow.Description,
+		Version:     "1.0.0",
+		SpecVersion: "1.0.0",
+		Definition:  workflow.Definition,
+		CreatedAt:   workflow.CreatedAt,
+		UpdatedAt:   workflow.UpdatedAt,
+		CreatedBy:   "api",
+		TenantID:    workflow.TenantID,
+	}
+	return w.database.UpdateWorkflowDefinition(ctx, workflow.ID, sharedWorkflow)
+}
+
+func (w *WorkflowRepositoryAdapter) Delete(ctx context.Context, id string) error {
+	return w.database.DeleteWorkflow(ctx, id)
+}
+
+func (w *WorkflowRepositoryAdapter) List(ctx context.Context, params *models.WorkflowListParams) ([]models.Workflow, int, error) {
+	filters := interfaces.WorkflowFilters{
+		Limit:  params.Limit,
+		Offset: params.Offset,
+		// TODO: Add TenantID and Name filters when available in WorkflowListParams
+	}
+
+	sharedWorkflows, err := w.database.ListWorkflows(ctx, filters)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	workflows := make([]models.Workflow, len(sharedWorkflows))
+	for i, sharedWorkflow := range sharedWorkflows {
+		workflows[i] = models.Workflow{
+			ID:          sharedWorkflow.ID,
+			Name:        sharedWorkflow.Name,
+			Description: sharedWorkflow.Description,
+			TenantID:    sharedWorkflow.TenantID,
+			Definition:  sharedWorkflow.Definition,
+			Status:      models.WorkflowStatusPending,
+			Tags:        []string{},
+			CreatedAt:   sharedWorkflow.CreatedAt,
+			UpdatedAt:   sharedWorkflow.UpdatedAt,
+		}
+	}
+
+	return workflows, len(workflows), nil
+}
+
+func convertToZapFields(keysAndValues ...interface{}) []zap.Field {
+	fields := make([]zap.Field, 0, len(keysAndValues)/2)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		if i+1 < len(keysAndValues) {
+			key := keysAndValues[i].(string)
+			value := keysAndValues[i+1]
+			fields = append(fields, zap.Any(key, value))
+		}
+	}
+	return fields
+}
+
+// EventStreamLoggerAdapter adapts zap.Logger to the shared eventstreaming.Logger interface
+type EventStreamLoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (l *EventStreamLoggerAdapter) Debug(msg string, fields ...interface{}) {
+	zapFields := l.convertFields(fields...)
+	l.logger.Debug(msg, zapFields...)
+}
+
+func (l *EventStreamLoggerAdapter) Info(msg string, fields ...interface{}) {
+	zapFields := l.convertFields(fields...)
+	l.logger.Info(msg, zapFields...)
+}
+
+func (l *EventStreamLoggerAdapter) Error(msg string, fields ...interface{}) {
+	zapFields := l.convertFields(fields...)
+	l.logger.Error(msg, zapFields...)
+}
+
+func (l *EventStreamLoggerAdapter) Warn(msg string, fields ...interface{}) {
+	zapFields := l.convertFields(fields...)
+	l.logger.Warn(msg, zapFields...)
+}
+
+func (l *EventStreamLoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
+	zapFields := make([]zap.Field, 0, len(fields)/2)
+	for i := 0; i < len(fields)-1; i += 2 {
+		if key, ok := fields[i].(string); ok {
+			zapFields = append(zapFields, zap.Any(key, fields[i+1]))
+		}
+	}
+	return zapFields
+}
 
 func main() {
 	// Initialize logger
@@ -37,17 +239,28 @@ func main() {
 		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Initialize Event Store client
-	eventStoreURL := getEnv("EVENTS_URL", "http://localhost:8081")
-	eventClient := client.NewEventClient(eventStoreURL, "api-service", logger)
+	// Initialize shared event streaming
+	eventStreamLogger := &EventStreamLoggerAdapter{logger: logger}
+	eventStream := eventstreaming.NewRedisEventStream(redisClient, eventStreamLogger)
 
-	// Initialize repositories
-	workflowRepo := repository.NewRedisWorkflowRepository(redisClient, logger)
+	// Initialize shared database
+	databaseLogger := &DatabaseLoggerAdapter{logger: logger}
+	database := storage.NewRedisDatabase(redisClient, databaseLogger, &interfaces.DatabaseConfig{
+		Type:       "redis",
+		Host:       getEnv("REDIS_HOST", "localhost"),
+		Port:       6379,
+		TenantMode: true,
+	})
+
+	// Initialize repositories (keeping execution repo for now)
 	executionRepo := repository.NewMemoryExecutionRepository()
 
 	// Initialize services
-	workflowService := services.NewWorkflowService(workflowRepo, executionRepo, eventClient, logger)
-	executionService := services.NewExecutionService(executionRepo, eventClient, logger)
+	workflowService := services.NewWorkflowService(database, executionRepo, eventStream, redisClient, logger)
+	// TODO: Update ExecutionService to use shared database interface
+	// For now, create a temporary adapter
+	workflowAdapter := &WorkflowRepositoryAdapter{database: database}
+	executionService := services.NewExecutionService(executionRepo, workflowAdapter, eventStream, redisClient, logger)
 
 	// Initialize handlers
 	workflowHandler := handlers.NewWorkflowHandler(workflowService, logger)
@@ -122,6 +335,7 @@ func setupRouter(
 			workflows.DELETE("/:id", workflowHandler.Delete)
 			workflows.POST("/:id/execute", workflowHandler.Execute)
 			workflows.GET("/:id/events", workflowHandler.GetEvents)
+			workflows.GET("/:id/executions", workflowHandler.GetExecutions)
 		}
 
 		// Execution routes
@@ -129,6 +343,7 @@ func setupRouter(
 		{
 			executions.GET("", executionHandler.List)
 			executions.GET("/:id", executionHandler.Get)
+			executions.GET("/:id/events", executionHandler.GetEvents)
 			executions.POST("/:id/cancel", executionHandler.Cancel)
 		}
 

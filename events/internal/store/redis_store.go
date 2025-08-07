@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // RedisEventStore implements event storage using Redis Streams
@@ -45,8 +47,22 @@ func (r *RedisEventStore) StoreEvent(ctx context.Context, event *cloudevents.Clo
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Create stream key based on workflow ID
-	streamKey := fmt.Sprintf("events:workflow:%s", event.WorkflowID)
+	// Determine storage strategy based on event type (execution-only approach with multi-tenancy)
+	var streamKey string
+	if event.ExecutionID != "" && strings.TrimSpace(event.ExecutionID) != "" {
+		// Execution-related events go to tenant-specific execution streams
+		if event.TenantID != "" && strings.TrimSpace(event.TenantID) != "" {
+			streamKey = fmt.Sprintf("events:execution:%s:%s", event.TenantID, event.ExecutionID)
+		} else {
+			// Fallback for events without tenant ID (backward compatibility)
+			streamKey = fmt.Sprintf("events:execution:%s", event.ExecutionID)
+		}
+		r.logger.Info("DEBUG: Using execution stream", zap.String("stream_key", streamKey), zap.String("tenant_id", event.TenantID), zap.String("execution_id", event.ExecutionID))
+	} else {
+		// Workflow-level events (creation, deletion, etc.) should not create streams
+		// These are just metadata operations and don't need event streams
+		return fmt.Errorf("workflow-level events should not be stored in event streams - execution_id is required")
+	}
 
 	// Store in Redis Stream
 	args := &redis.XAddArgs{
@@ -56,6 +72,8 @@ func (r *RedisEventStore) StoreEvent(ctx context.Context, event *cloudevents.Clo
 			"event_type":   event.Type,
 			"source":       event.Source,
 			"workflow_id":  event.WorkflowID,
+			"execution_id": event.ExecutionID,
+			"task_id":      event.TaskID,
 			"data":         string(eventData),
 			"timestamp":    event.Time.Unix(),
 			"spec_version": event.SpecVersion,
@@ -67,29 +85,11 @@ func (r *RedisEventStore) StoreEvent(ctx context.Context, event *cloudevents.Clo
 		return fmt.Errorf("failed to store event in Redis: %w", err)
 	}
 
-	// Also store in global event stream for cross-workflow queries
-	globalArgs := &redis.XAddArgs{
-		Stream: "events:global",
-		Values: map[string]interface{}{
-			"event_id":     event.ID,
-			"event_type":   event.Type,
-			"source":       event.Source,
-			"workflow_id":  event.WorkflowID,
-			"data":         string(eventData),
-			"timestamp":    event.Time.Unix(),
-			"spec_version": event.SpecVersion,
-			"stream_id":    messageID,
-		},
-	}
-
-	_, err = r.client.XAdd(ctx, globalArgs).Result()
-	if err != nil {
-		r.logger.Error("Failed to store event in global stream", zap.Error(err))
-		// Don't fail the operation, just log the error
-	}
+	// No global stream needed - execution-only approach
 
 	r.logger.Debug("Event stored successfully",
 		zap.String("event_id", event.ID),
+		zap.String("execution_id", event.ExecutionID),
 		zap.String("workflow_id", event.WorkflowID),
 		zap.String("type", event.Type),
 		zap.String("message_id", messageID))
@@ -97,9 +97,39 @@ func (r *RedisEventStore) StoreEvent(ctx context.Context, event *cloudevents.Clo
 	return nil
 }
 
-// GetEventHistory retrieves all events for a workflow
+// GetEventHistory retrieves all events for a workflow (aggregated from all executions)
 func (r *RedisEventStore) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
-	streamKey := fmt.Sprintf("events:workflow:%s", workflowID)
+	// Get all execution IDs for this workflow
+	executionIDs, err := r.GetWorkflowExecutions(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow executions: %w", err)
+	}
+
+	var allEvents []*cloudevents.CloudEvent
+
+	// Collect events from all executions
+	for _, executionID := range executionIDs {
+		executionEvents, err := r.GetExecutionHistory(ctx, executionID)
+		if err != nil {
+			r.logger.Error("Failed to get execution events",
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			continue
+		}
+		allEvents = append(allEvents, executionEvents...)
+	}
+
+	// Sort events by timestamp (oldest first)
+	sort.Slice(allEvents, func(i, j int) bool {
+		return allEvents[i].Time.Before(allEvents[j].Time)
+	})
+
+	return allEvents, nil
+}
+
+// GetExecutionHistory retrieves all events for a specific execution
+func (r *RedisEventStore) GetExecutionHistory(ctx context.Context, executionID string) ([]*cloudevents.CloudEvent, error) {
+	streamKey := fmt.Sprintf("events:execution:%s", executionID)
 
 	// Read all events from the stream
 	result, err := r.client.XRange(ctx, streamKey, "-", "+").Result()
@@ -122,29 +152,87 @@ func (r *RedisEventStore) GetEventHistory(ctx context.Context, workflowID string
 	return events, nil
 }
 
-// GetEventsSince retrieves events for a workflow since a specific version/timestamp
-func (r *RedisEventStore) GetEventsSince(ctx context.Context, workflowID string, since string) ([]*cloudevents.CloudEvent, error) {
-	streamKey := fmt.Sprintf("events:workflow:%s", workflowID)
-
-	// Read events from the stream since the specified ID
-	result, err := r.client.XRange(ctx, streamKey, since, "+").Result()
+// GetWorkflowExecutions retrieves all execution IDs for a workflow
+func (r *RedisEventStore) GetWorkflowExecutions(ctx context.Context, workflowID string) ([]string, error) {
+	// Search for all execution streams that belong to this workflow
+	pattern := "events:execution:*"
+	keys, err := r.client.Keys(ctx, pattern).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read events since %s: %w", since, err)
+		return nil, fmt.Errorf("failed to search execution streams: %w", err)
 	}
 
-	events := make([]*cloudevents.CloudEvent, 0, len(result))
-	for _, message := range result {
-		event, err := r.parseEventFromMessage(message)
+	var executionIDs []string
+	for _, key := range keys {
+		// Extract execution ID from key (events:execution:{executionID})
+		if len(key) > 17 { // len("events:execution:") = 17
+			executionID := key[17:]
+
+			// Check if this execution belongs to the workflow by reading the first event
+			firstEvent, err := r.getFirstEventFromStream(ctx, key)
+			if err != nil {
+				continue // Skip if we can't read the stream
+			}
+
+			if firstEvent != nil && firstEvent.WorkflowID == workflowID {
+				executionIDs = append(executionIDs, executionID)
+			}
+		}
+	}
+
+	return executionIDs, nil
+}
+
+// getFirstEventFromStream gets the first event from a stream (for workflow ID lookup)
+func (r *RedisEventStore) getFirstEventFromStream(ctx context.Context, streamKey string) (*cloudevents.CloudEvent, error) {
+	result, err := r.client.XRange(ctx, streamKey, "-", "+").Result()
+	if err != nil || len(result) == 0 {
+		return nil, err
+	}
+
+	return r.parseEventFromMessage(result[0])
+}
+
+// GetEventsSince retrieves events for a workflow since a specific version/timestamp (from execution streams)
+func (r *RedisEventStore) GetEventsSince(ctx context.Context, workflowID string, since string) ([]*cloudevents.CloudEvent, error) {
+	// Get all execution IDs for this workflow
+	executionIDs, err := r.GetWorkflowExecutions(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow executions: %w", err)
+	}
+
+	var allEvents []*cloudevents.CloudEvent
+
+	// Collect events from all executions since the specified time
+	for _, executionID := range executionIDs {
+		streamKey := fmt.Sprintf("events:execution:%s", executionID)
+
+		// Read events from the execution stream since the specified ID
+		result, err := r.client.XRange(ctx, streamKey, since, "+").Result()
 		if err != nil {
-			r.logger.Error("Failed to parse event from Redis message",
-				zap.Error(err),
-				zap.String("message_id", message.ID))
+			r.logger.Error("Failed to read events from execution stream",
+				zap.String("execution_id", executionID),
+				zap.Error(err))
 			continue
 		}
-		events = append(events, event)
+
+		for _, message := range result {
+			event, err := r.parseEventFromMessage(message)
+			if err != nil {
+				r.logger.Error("Failed to parse event from Redis message",
+					zap.Error(err),
+					zap.String("message_id", message.ID))
+				continue
+			}
+			allEvents = append(allEvents, event)
+		}
 	}
 
-	return events, nil
+	// Sort events by timestamp (oldest first)
+	sort.Slice(allEvents, func(i, j int) bool {
+		return allEvents[i].Time.Before(allEvents[j].Time)
+	})
+
+	return allEvents, nil
 }
 
 // GetStreamEvents retrieves events from a specific stream

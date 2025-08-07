@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/events/internal/interfaces"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // RedisPublisher implements EventPublisher using Redis Pub/Sub

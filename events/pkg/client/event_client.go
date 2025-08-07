@@ -12,14 +12,14 @@ import (
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // EventClient provides a client interface to the Event Store service
 type EventClient struct {
-	baseURL    string
-	httpClient *http.Client
-	logger     *zap.Logger
+	baseURL     string
+	httpClient  *http.Client
+	logger      *zap.Logger
 	serviceName string
 }
 
@@ -74,7 +74,7 @@ func (c *EventClient) PublishEvent(ctx context.Context, event *cloudevents.Cloud
 // GetEventHistory retrieves event history for a workflow
 func (c *EventClient) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
 	url := fmt.Sprintf("%s/api/v1/events/%s", c.baseURL, workflowID)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -117,23 +117,23 @@ func (c *EventClient) SubscribeWebSocket(ctx context.Context, eventTypes, workfl
 	}
 
 	u.Path = "/ws"
-	
+
 	// Add query parameters
 	query := u.Query()
 	query.Set("service", c.serviceName)
-	
+
 	for _, eventType := range eventTypes {
 		query.Add("event_types", eventType)
 	}
-	
+
 	for _, workflowID := range workflowIDs {
 		query.Add("workflow_ids", workflowID)
 	}
-	
+
 	for key, value := range filters {
 		query.Set(key, value)
 	}
-	
+
 	u.RawQuery = query.Encode()
 
 	// Connect to WebSocket

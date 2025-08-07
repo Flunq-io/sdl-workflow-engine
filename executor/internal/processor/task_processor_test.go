@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 	"github.com/flunq-io/executor/internal/executor"
 )
 
@@ -83,7 +83,7 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 	})).Return(nil)
 
 	// Execute
-	err := processor.publishTaskCompletedEvent(context.Background(), taskResult)
+	err := processor.publishTaskCompletedEvent(context.Background(), taskResult, "test-tenant")
 
 	// Assert
 	assert.NoError(t, err)

@@ -2,16 +2,19 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/flunq-io/api/internal/adapters"
 	"github.com/flunq-io/api/internal/models"
-	"github.com/flunq-io/events/pkg/client"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/interfaces"
 )
 
 // Common service errors
@@ -40,24 +43,27 @@ type ExecutionRepository interface {
 
 // WorkflowService handles workflow business logic
 type WorkflowService struct {
-	workflowRepo  WorkflowRepository
-	executionRepo ExecutionRepository
-	eventClient   *client.EventClient
-	logger        *zap.Logger
+	workflowAdapter *adapters.WorkflowAdapter
+	executionRepo   ExecutionRepository
+	eventStream     interfaces.EventStream
+	redisClient     *redis.Client
+	logger          *zap.Logger
 }
 
 // NewWorkflowService creates a new workflow service
 func NewWorkflowService(
-	workflowRepo WorkflowRepository,
+	database interfaces.Database,
 	executionRepo ExecutionRepository,
-	eventClient *client.EventClient,
+	eventStream interfaces.EventStream,
+	redisClient *redis.Client,
 	logger *zap.Logger,
 ) *WorkflowService {
 	return &WorkflowService{
-		workflowRepo:  workflowRepo,
-		executionRepo: executionRepo,
-		eventClient:   eventClient,
-		logger:        logger,
+		workflowAdapter: adapters.NewWorkflowAdapter(database),
+		executionRepo:   executionRepo,
+		eventStream:     eventStream,
+		redisClient:     redisClient,
+		logger:          logger,
 	}
 }
 
@@ -71,6 +77,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 		ID:          workflowID,
 		Name:        req.Name,
 		Description: req.Description,
+		TenantID:    req.TenantID,
 		Definition:  req.Definition,
 		Status:      models.WorkflowStatusPending,
 		Tags:        req.Tags,
@@ -84,26 +91,51 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 	}
 
 	// Save to repository
-	if err := s.workflowRepo.Create(ctx, workflow); err != nil {
+	if err := s.workflowAdapter.Create(ctx, workflow); err != nil {
 		s.logger.Error("Failed to create workflow in repository", zap.Error(err))
 		return nil, fmt.Errorf("failed to create workflow: %w", err)
 	}
 
 	// Publish workflow created event
-	event := cloudevents.NewWorkflowEvent(
+	event := cloudevents.NewCloudEvent(
 		uuid.New().String(),
 		cloudevents.SourceAPI,
 		cloudevents.WorkflowCreated,
-		workflowID,
 	)
+	event.WorkflowID = workflowID
+	event.Time = time.Now()
+	event.TenantID = workflow.TenantID
+
+	// Extract workflow definition ID for stream routing
+	workflowDefinitionID := "default"
+	if workflow.Definition != nil {
+		if defID, exists := workflow.Definition["id"]; exists {
+			if defIDStr, ok := defID.(string); ok && defIDStr != "" {
+				workflowDefinitionID = defIDStr
+			}
+		} else if defName, exists := workflow.Definition["name"]; exists {
+			if defNameStr, ok := defName.(string); ok && defNameStr != "" {
+				workflowDefinitionID = defNameStr
+			}
+		}
+	}
+
 	event.SetData(map[string]interface{}{
-		"name":        workflow.Name,
-		"description": workflow.Description,
-		"status":      workflow.Status,
-		"created_by":  "api", // TODO: Get from authentication context
+		"name":                   workflow.Name,
+		"description":            workflow.Description,
+		"status":                 workflow.Status,
+		"tenant_id":              workflow.TenantID,
+		"workflow_definition_id": workflowDefinitionID, // Just the definition ID for stream routing
+		"definition":             workflow.Definition,  // Include the workflow definition
+		"created_by":             "api",                // TODO: Get from authentication context
 	})
 
-	if err := s.eventClient.PublishEvent(ctx, event); err != nil {
+	// Add tenant and workflow metadata to event (using proper CloudEvent fields)
+	event.TenantID = workflow.TenantID
+	event.WorkflowID = workflowID
+
+	// Publish using shared event streaming (auto-routes to tenant-isolated streams)
+	if err := s.eventStream.Publish(ctx, event); err != nil {
 		s.logger.Error("Failed to publish workflow created event", zap.Error(err))
 		// Don't fail the operation, just log the error
 	}
@@ -117,7 +149,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 
 // GetWorkflow retrieves a workflow by ID
 func (s *WorkflowService) GetWorkflow(ctx context.Context, workflowID string) (*models.WorkflowDetail, error) {
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
+	workflow, err := s.workflowAdapter.GetByID(ctx, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return nil, ErrWorkflowNotFound
@@ -132,7 +164,7 @@ func (s *WorkflowService) GetWorkflow(ctx context.Context, workflowID string) (*
 // UpdateWorkflow updates an existing workflow
 func (s *WorkflowService) UpdateWorkflow(ctx context.Context, workflowID string, req *models.UpdateWorkflowRequest) (*models.Workflow, error) {
 	// Get existing workflow
-	existingWorkflow, err := s.workflowRepo.GetByID(ctx, workflowID)
+	existingWorkflow, err := s.workflowAdapter.GetByID(ctx, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return nil, ErrWorkflowNotFound
@@ -164,18 +196,19 @@ func (s *WorkflowService) UpdateWorkflow(ctx context.Context, workflowID string,
 	}
 
 	// Save to repository
-	if err := s.workflowRepo.Update(ctx, workflow); err != nil {
+	if err := s.workflowAdapter.Update(ctx, workflow); err != nil {
 		s.logger.Error("Failed to update workflow in repository", zap.Error(err))
 		return nil, fmt.Errorf("failed to update workflow: %w", err)
 	}
 
 	// Publish workflow updated event
-	event := cloudevents.NewWorkflowEvent(
+	event := cloudevents.NewCloudEvent(
 		uuid.New().String(),
 		cloudevents.SourceAPI,
 		"io.flunq.workflow.updated",
-		workflowID,
 	)
+	event.WorkflowID = workflowID
+	event.Time = time.Now()
 	event.SetData(map[string]interface{}{
 		"name":        workflow.Name,
 		"description": workflow.Description,
@@ -183,7 +216,12 @@ func (s *WorkflowService) UpdateWorkflow(ctx context.Context, workflowID string,
 		"updated_by":  "api", // TODO: Get from authentication context
 	})
 
-	if err := s.eventClient.PublishEvent(ctx, event); err != nil {
+	// Add tenant and workflow metadata to event (using proper CloudEvent fields)
+	event.TenantID = workflow.TenantID
+	event.WorkflowID = workflowID
+
+	// Publish using shared event streaming (auto-routes to tenant-isolated streams)
+	if err := s.eventStream.Publish(ctx, event); err != nil {
 		s.logger.Error("Failed to publish workflow updated event", zap.Error(err))
 		// Don't fail the operation, just log the error
 	}
@@ -196,8 +234,8 @@ func (s *WorkflowService) UpdateWorkflow(ctx context.Context, workflowID string,
 
 // DeleteWorkflow deletes a workflow
 func (s *WorkflowService) DeleteWorkflow(ctx context.Context, workflowID string) error {
-	// Check if workflow exists
-	_, err := s.workflowRepo.GetByID(ctx, workflowID)
+	// Check if workflow exists and get tenant ID for event publishing
+	workflow, err := s.workflowAdapter.GetByID(ctx, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return ErrWorkflowNotFound
@@ -208,23 +246,29 @@ func (s *WorkflowService) DeleteWorkflow(ctx context.Context, workflowID string)
 	// TODO: Check if there are running executions and prevent deletion
 
 	// Delete from repository
-	if err := s.workflowRepo.Delete(ctx, workflowID); err != nil {
+	if err := s.workflowAdapter.Delete(ctx, workflowID); err != nil {
 		s.logger.Error("Failed to delete workflow from repository", zap.Error(err))
 		return fmt.Errorf("failed to delete workflow: %w", err)
 	}
 
 	// Publish workflow deleted event
-	event := cloudevents.NewWorkflowEvent(
+	event := cloudevents.NewCloudEvent(
 		uuid.New().String(),
 		cloudevents.SourceAPI,
 		"io.flunq.workflow.deleted",
-		workflowID,
 	)
+	event.WorkflowID = workflowID
+	event.Time = time.Now()
 	event.SetData(map[string]interface{}{
 		"deleted_by": "api", // TODO: Get from authentication context
 	})
 
-	if err := s.eventClient.PublishEvent(ctx, event); err != nil {
+	// Add tenant and workflow metadata to event (using proper CloudEvent fields)
+	event.TenantID = workflow.TenantID
+	event.WorkflowID = workflowID
+
+	// Publish using shared event streaming (auto-routes to tenant-isolated streams)
+	if err := s.eventStream.Publish(ctx, event); err != nil {
 		s.logger.Error("Failed to publish workflow deleted event", zap.Error(err))
 		// Don't fail the operation, just log the error
 	}
@@ -237,7 +281,7 @@ func (s *WorkflowService) DeleteWorkflow(ctx context.Context, workflowID string)
 
 // ListWorkflows lists workflows with optional filtering
 func (s *WorkflowService) ListWorkflows(ctx context.Context, params *models.WorkflowListParams) ([]models.Workflow, int, error) {
-	workflows, total, err := s.workflowRepo.List(ctx, params)
+	workflows, total, err := s.workflowAdapter.List(ctx, params)
 	if err != nil {
 		s.logger.Error("Failed to list workflows from repository", zap.Error(err))
 		return nil, 0, fmt.Errorf("failed to list workflows: %w", err)
@@ -249,7 +293,7 @@ func (s *WorkflowService) ListWorkflows(ctx context.Context, params *models.Work
 // ExecuteWorkflow starts execution of a workflow
 func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string, req *models.ExecuteWorkflowRequest) (*models.Execution, error) {
 	// Get workflow
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
+	workflow, err := s.workflowAdapter.GetByID(ctx, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return nil, ErrWorkflowNotFound
@@ -282,21 +326,45 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 	}
 
 	// Publish workflow execution started event
-	event := cloudevents.NewExecutionEvent(
+	event := cloudevents.NewCloudEvent(
 		uuid.New().String(),
 		cloudevents.SourceAPI,
 		cloudevents.ExecutionStarted,
-		workflowID,
-		executionID,
 	)
+	event.WorkflowID = workflowID
+	event.ExecutionID = executionID
+	event.Time = time.Now()
+	event.TenantID = workflow.TenantID
+	// Extract workflow definition ID for stream routing
+	workflowDefinitionID := "default"
+	if workflow.Definition != nil {
+		if defID, exists := workflow.Definition["id"]; exists {
+			if defIDStr, ok := defID.(string); ok && defIDStr != "" {
+				workflowDefinitionID = defIDStr
+			}
+		} else if defName, exists := workflow.Definition["name"]; exists {
+			if defNameStr, ok := defName.(string); ok && defNameStr != "" {
+				workflowDefinitionID = defNameStr
+			}
+		}
+	}
+
 	event.SetData(map[string]interface{}{
-		"workflow_name":  workflow.Name,
-		"correlation_id": execution.CorrelationID,
-		"input":          execution.Input,
-		"started_by":     "api", // TODO: Get from authentication context
+		"workflow_name":          workflow.Name,
+		"workflow_definition_id": workflowDefinitionID, // Just the definition ID for stream routing
+		"correlation_id":         execution.CorrelationID,
+		"input":                  execution.Input,
+		"tenant_id":              workflow.TenantID,
+		"started_by":             "api", // TODO: Get from authentication context
 	})
 
-	if err := s.eventClient.PublishEvent(ctx, event); err != nil {
+	// Add tenant, workflow, and execution metadata to event (using proper CloudEvent fields)
+	event.TenantID = workflow.TenantID
+	event.WorkflowID = workflow.ID
+	event.ExecutionID = executionID
+
+	// Publish using shared event streaming (auto-routes to tenant-isolated streams)
+	if err := s.eventStream.Publish(ctx, event); err != nil {
 		s.logger.Error("Failed to publish execution started event", zap.Error(err))
 		// Don't fail the operation, just log the error
 	}
@@ -311,20 +379,13 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 // GetWorkflowEvents retrieves event history for a workflow
 func (s *WorkflowService) GetWorkflowEvents(ctx context.Context, workflowID string, params *models.EventHistoryParams) ([]models.CloudEvent, error) {
 	// Get events from Event Store directly - don't check if workflow exists
-	// Events can exist for workflows that might have been deleted or are not in current repository
+	// TODO: Implement event history reading with shared event streaming
+	// For now, return empty list since shared event streaming doesn't have ReadHistory method
+	// This can be implemented later by querying Redis streams directly or adding ReadHistory to shared interface
 	var events []*cloudevents.CloudEvent
-	var err error
 
-	if params.Since != "" {
-		events, err = s.eventClient.GetEventHistory(ctx, workflowID) // TODO: Implement GetEventsSince
-	} else {
-		events, err = s.eventClient.GetEventHistory(ctx, workflowID)
-	}
-
-	if err != nil {
-		s.logger.Error("Failed to get workflow events", zap.Error(err))
-		return nil, fmt.Errorf("failed to get workflow events: %w", err)
-	}
+	s.logger.Warn("GetWorkflowEvents not fully implemented with shared event streaming",
+		zap.String("workflow_id", workflowID))
 
 	// Convert to API models
 	apiEvents := make([]models.CloudEvent, len(events))
@@ -349,6 +410,190 @@ func (s *WorkflowService) GetWorkflowEvents(ctx context.Context, workflowID stri
 	}
 
 	return apiEvents, nil
+}
+
+// GetWorkflowExecutions retrieves all executions for a specific workflow from workflow state storage
+func (s *WorkflowService) GetWorkflowExecutions(ctx context.Context, workflowID string, params *models.ExecutionListParams) ([]models.Execution, int, error) {
+	s.logger.Debug("Getting workflow executions from state storage",
+		zap.String("workflow_id", workflowID))
+
+	// Check if workflow exists
+	_, err := s.workflowAdapter.GetByID(ctx, workflowID)
+	if err != nil {
+		if isNotFoundError(err) {
+			return nil, 0, ErrWorkflowNotFound
+		}
+		s.logger.Error("Failed to get workflow from adapter",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to get workflow: %w", err)
+	}
+
+	// Read workflow state from Redis (Worker service stores state here)
+	executions, err := s.getExecutionsFromWorkflowState(ctx, workflowID)
+	if err != nil {
+		s.logger.Error("Failed to get executions from workflow state",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to get executions from state: %w", err)
+	}
+
+	// Filter executions if needed (for now, we only have one execution per workflow)
+	total := len(executions)
+
+	s.logger.Info("Retrieved workflow executions from state storage",
+		zap.String("workflow_id", workflowID),
+		zap.Int("total_executions", total))
+
+	return executions, total, nil
+}
+
+// getExecutionsFromWorkflowState reads workflow state from Redis and converts to execution format
+func (s *WorkflowService) getExecutionsFromWorkflowState(ctx context.Context, workflowID string) ([]models.Execution, error) {
+	// The Worker service stores workflow state with key: workflow:state:{workflowID}
+	stateKey := fmt.Sprintf("workflow:state:%s", workflowID)
+
+	s.logger.Debug("Reading workflow state from Redis",
+		zap.String("workflow_id", workflowID),
+		zap.String("state_key", stateKey))
+
+	// Get workflow state from Redis
+	stateData, err := s.redisClient.Get(ctx, stateKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			// No state found - workflow hasn't been executed yet
+			s.logger.Debug("No workflow state found",
+				zap.String("workflow_id", workflowID))
+			return []models.Execution{}, nil
+		}
+		return nil, fmt.Errorf("failed to get workflow state from Redis: %w", err)
+	}
+
+	// Parse the workflow state JSON
+	var workflowState map[string]interface{}
+	if err := json.Unmarshal([]byte(stateData), &workflowState); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow state JSON: %w", err)
+	}
+
+	// Convert workflow state to execution format
+	execution, err := s.convertWorkflowStateToExecution(workflowState, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert workflow state to execution: %w", err)
+	}
+
+	s.logger.Info("Successfully converted workflow state to execution",
+		zap.String("workflow_id", workflowID),
+		zap.String("execution_id", execution.ID),
+		zap.String("status", string(execution.Status)))
+
+	return []models.Execution{*execution}, nil
+}
+
+// convertWorkflowStateToExecution converts Worker service workflow state to API execution format
+func (s *WorkflowService) convertWorkflowStateToExecution(state map[string]interface{}, workflowID string) (*models.Execution, error) {
+	// Extract execution ID from context
+	executionID := ""
+	if context, ok := state["context"].(map[string]interface{}); ok {
+		if execID, exists := context["execution_id"]; exists {
+			if execIDStr, ok := execID.(string); ok {
+				executionID = execIDStr
+			}
+		}
+	}
+
+	if executionID == "" {
+		return nil, fmt.Errorf("execution_id not found in workflow state")
+	}
+
+	// Convert status from numeric to SDL status
+	status := models.ExecutionStatusPending // default
+	if statusNum, ok := state["status"].(float64); ok {
+		status = s.convertNumericStatusToSDL(int(statusNum))
+	}
+
+	// Extract input data
+	var input map[string]interface{}
+	if inputData, ok := state["input"].(map[string]interface{}); ok {
+		input = inputData
+	}
+
+	// Extract variables as output (final state)
+	var output map[string]interface{}
+	if variables, ok := state["variables"].(map[string]interface{}); ok {
+		output = variables
+	}
+
+	// Extract timestamps
+	var startedAt time.Time
+	var completedAt *time.Time
+
+	if createdAtData, ok := state["created_at"].(map[string]interface{}); ok {
+		if seconds, exists := createdAtData["seconds"]; exists {
+			if secondsFloat, ok := seconds.(float64); ok {
+				startedAt = time.Unix(int64(secondsFloat), 0)
+			}
+		}
+	}
+
+	if updatedAtData, ok := state["updated_at"].(map[string]interface{}); ok {
+		if seconds, exists := updatedAtData["seconds"]; exists {
+			if secondsFloat, ok := seconds.(float64); ok {
+				updatedTime := time.Unix(int64(secondsFloat), 0)
+				// If status is completed/failed/cancelled, set completed_at
+				if status == models.ExecutionStatusCompleted ||
+					status == models.ExecutionStatusFaulted ||
+					status == models.ExecutionStatusCancelled {
+					completedAt = &updatedTime
+				}
+			}
+		}
+	}
+
+	// Calculate duration if completed
+	var durationMs *int64
+	if completedAt != nil {
+		duration := completedAt.Sub(startedAt).Milliseconds()
+		durationMs = &duration
+	}
+
+	execution := &models.Execution{
+		ID:          executionID,
+		WorkflowID:  workflowID,
+		Status:      status,
+		Input:       input,
+		Output:      output,
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+		DurationMs:  durationMs,
+	}
+
+	return execution, nil
+}
+
+// convertNumericStatusToSDL converts Worker service numeric status to SDL execution status
+func (s *WorkflowService) convertNumericStatusToSDL(numericStatus int) models.ExecutionStatus {
+	// Based on the Worker service protobuf definitions:
+	// 0 = WORKFLOW_STATUS_UNSPECIFIED
+	// 1 = WORKFLOW_STATUS_CREATED
+	// 2 = WORKFLOW_STATUS_RUNNING
+	// 3 = WORKFLOW_STATUS_COMPLETED
+	// 4 = WORKFLOW_STATUS_FAILED
+	// 5 = WORKFLOW_STATUS_CANCELLED
+
+	switch numericStatus {
+	case 1:
+		return models.ExecutionStatusPending
+	case 2:
+		return models.ExecutionStatusRunning
+	case 3:
+		return models.ExecutionStatusCompleted
+	case 4:
+		return models.ExecutionStatusFaulted
+	case 5:
+		return models.ExecutionStatusCancelled
+	default:
+		return models.ExecutionStatusPending
+	}
 }
 
 // generateWorkflowID generates a unique workflow ID

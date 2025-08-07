@@ -156,3 +156,62 @@ func (h *ExecutionHandler) Cancel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, execution.ToResponse())
 }
+
+// GetEvents handles GET /api/v1/executions/:id/events
+func (h *ExecutionHandler) GetEvents(c *gin.Context) {
+	executionID := c.Param("id")
+	if executionID == "" {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"execution ID is required",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Parse query parameters
+	var params models.EventHistoryParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		h.logger.Error("Failed to bind event history query parameters", zap.Error(err))
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			models.MessageValidationFailed,
+		).WithDetails(map[string]interface{}{
+			"validation_error": err.Error(),
+		}).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Set defaults
+	if params.Limit == 0 {
+		params.Limit = 100
+	}
+
+	events, err := h.executionService.GetExecutionEvents(c.Request.Context(), executionID, &params)
+	if err != nil {
+		h.logger.Error("Failed to get execution events",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+
+		if err == services.ErrExecutionNotFound {
+			c.JSON(http.StatusNotFound, models.NewErrorResponse(
+				models.ErrorCodeExecutionNotFound,
+				models.MessageExecutionNotFound,
+			).WithRequestID(getRequestID(c)))
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrorCodeInternalError,
+			models.MessageInternalError,
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	response := models.EventHistoryResponse{
+		Events: events,
+		Count:  len(events),
+		Since:  params.Since,
+	}
+
+	c.JSON(http.StatusOK, response)
+}

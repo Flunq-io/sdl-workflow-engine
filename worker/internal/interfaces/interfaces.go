@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 	"github.com/flunq-io/worker/proto/gen"
 )
 

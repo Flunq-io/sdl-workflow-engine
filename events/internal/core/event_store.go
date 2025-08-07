@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/events/internal/interfaces"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // EventStore is the core event store service
@@ -79,6 +79,40 @@ func (e *EventStore) GetEventHistory(ctx context.Context, workflowID string) ([]
 		zap.Int("event_count", len(events)))
 
 	return events, nil
+}
+
+// GetExecutionHistory retrieves event history for a specific execution
+func (e *EventStore) GetExecutionHistory(ctx context.Context, executionID string) ([]*cloudevents.CloudEvent, error) {
+	events, err := e.storage.GetExecutionHistory(ctx, executionID)
+	if err != nil {
+		e.logger.Error("Failed to get execution history",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to get execution history: %w", err)
+	}
+
+	e.logger.Debug("Retrieved execution history",
+		zap.String("execution_id", executionID),
+		zap.Int("event_count", len(events)))
+
+	return events, nil
+}
+
+// GetWorkflowExecutions retrieves all execution IDs for a workflow
+func (e *EventStore) GetWorkflowExecutions(ctx context.Context, workflowID string) ([]string, error) {
+	executionIDs, err := e.storage.GetWorkflowExecutions(ctx, workflowID)
+	if err != nil {
+		e.logger.Error("Failed to get workflow executions",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to get workflow executions: %w", err)
+	}
+
+	e.logger.Debug("Retrieved workflow executions",
+		zap.String("workflow_id", workflowID),
+		zap.Int("execution_count", len(executionIDs)))
+
+	return executionIDs, nil
 }
 
 // GetEventsSince retrieves events since a specific version
@@ -165,10 +199,10 @@ func (e *EventStore) Close() error {
 	if err := e.storage.Close(); err != nil {
 		e.logger.Error("Failed to close storage", zap.Error(err))
 	}
-	
+
 	if err := e.publisher.Close(); err != nil {
 		e.logger.Error("Failed to close publisher", zap.Error(err))
 	}
-	
+
 	return nil
 }

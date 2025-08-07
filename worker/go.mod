@@ -5,15 +5,13 @@ go 1.23.0
 toolchain go1.24.3
 
 require (
-	github.com/flunq-io/events v0.0.0-00010101000000-000000000000
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	google.golang.org/protobuf v1.34.2
 )
 
 // Local dependencies
-replace github.com/flunq-io/events => ../events
 
 replace github.com/flunq-io/shared => ../shared
 

@@ -109,8 +109,33 @@ function extractInputData(event: WorkflowEvent): Record<string, any> | null {
     return event.data.input
   }
 
-  // For task events - check for input_data (protobuf) or input
-  if (event.type.includes('task.')) {
+  // For task events - try to get meaningful business data instead of internal metadata
+  if (event.type.includes('task.requested')) {
+    // For set tasks, the input is usually the workflow context/variables available to the task
+    // Look for actual business data in config parameters
+    if (event.data.config?.parameters) {
+      const params = event.data.config.parameters
+      // Filter out internal metadata and show only business data
+      const businessData: Record<string, any> = {}
+
+      // For set tasks, show what variables are being set
+      if (params.set_data) {
+        return { variables_to_set: params.set_data }
+      }
+
+      // For other task types, show the parameters
+      Object.keys(params).forEach(key => {
+        if (!key.includes('_data') && !key.includes('metadata')) {
+          businessData[key] = params[key]
+        }
+      })
+
+      if (Object.keys(businessData).length > 0) {
+        return businessData
+      }
+    }
+
+    // Fallback to original input data
     if (event.data.input_data) return event.data.input_data
     if (event.data.input) return event.data.input
   }
@@ -126,10 +151,28 @@ function extractOutputData(event: WorkflowEvent): Record<string, any> | null {
     return event.data.output
   }
 
-  // For task completion events - check for output_data (protobuf) or output
+  // For task completion events - extract meaningful business data
   if (event.type.includes('task.completed')) {
-    // Check nested data structure first
-    if (event.data.data?.output) return event.data.data.output
+    // Try to get the actual values that were set/produced by the task
+
+    // Check for set_data in the nested output (this contains the actual values set)
+    if (event.data.data?.output?.set_data) {
+      return event.data.data.output.set_data
+    }
+
+    // Check for set_data in direct output
+    if (event.data.output?.set_data) {
+      return event.data.output.set_data
+    }
+
+    // For wait tasks, show the wait completion data
+    if (event.data.output && Object.keys(event.data.output).some(key =>
+      key.includes('duration') || key.includes('waited') || key.includes('completed_at')
+    )) {
+      return event.data.output
+    }
+
+    // Final fallbacks
     if (event.data.output_data) return event.data.output_data
     if (event.data.output) return event.data.output
   }

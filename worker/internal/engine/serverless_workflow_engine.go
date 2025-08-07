@@ -11,20 +11,27 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/jq"
 	"github.com/flunq-io/worker/internal/interfaces"
 	"github.com/flunq-io/worker/proto/gen"
+	"go.uber.org/zap"
 )
 
 // ServerlessWorkflowEngine implements the WorkflowEngine interface using the official Serverless Workflow SDK
 type ServerlessWorkflowEngine struct {
-	logger interfaces.Logger
+	logger      interfaces.Logger
+	jqEvaluator *jq.Evaluator
 }
 
 // NewServerlessWorkflowEngine creates a new Serverless Workflow engine
 func NewServerlessWorkflowEngine(logger interfaces.Logger) interfaces.WorkflowEngine {
+	// Create a zap logger for JQ evaluator
+	zapLogger, _ := zap.NewDevelopment()
+
 	return &ServerlessWorkflowEngine{
-		logger: logger,
+		logger:      logger,
+		jqEvaluator: jq.NewEvaluator(zapLogger),
 	}
 }
 
@@ -53,7 +60,19 @@ func (e *ServerlessWorkflowEngine) ParseDefinition(ctx context.Context, dslData 
 		description = getStringValue(document, "description")
 		version = getStringValue(document, "version")
 		specVersion = getStringValue(document, "dsl")
-		startState = "start" // DSL 1.0.0 doesn't have explicit start state
+
+		// For DSL 1.0.0, extract the first task name from the "do" section as start state
+		if doSection, ok := dslMap["do"].([]interface{}); ok && len(doSection) > 0 {
+			if firstTask, ok := doSection[0].(map[string]interface{}); ok {
+				for taskName := range firstTask {
+					startState = taskName
+					break // Use the first (and should be only) key as start state
+				}
+			}
+		}
+		if startState == "" {
+			startState = "start" // Fallback if no tasks found
+		}
 	} else {
 		// Handle DSL 0.8 format
 		workflowID = getStringValue(dslMap, "id")
@@ -244,6 +263,7 @@ func (e *ServerlessWorkflowEngine) processExecutionStartedEvent(state *gen.Workf
 	if eventData, ok := event.Data.(map[string]interface{}); ok {
 		context := &gen.ExecutionContext{
 			ExecutionId: event.ExecutionID,
+			TenantId:    event.TenantID, // Set tenant ID from CloudEvent
 		}
 
 		if correlationId, exists := eventData["correlation_id"]; exists {
@@ -259,6 +279,12 @@ func (e *ServerlessWorkflowEngine) processExecutionStartedEvent(state *gen.Workf
 		}
 
 		state.Context = context
+
+		e.logger.Info("DEBUG: Set execution context during state rebuild",
+			"workflow_id", state.WorkflowId,
+			"execution_id", context.ExecutionId,
+			"tenant_id", context.TenantId,
+			"event_id", event.ID)
 
 		// Extract input data
 		if input, exists := eventData["input"]; exists {
@@ -318,7 +344,40 @@ func (e *ServerlessWorkflowEngine) processTaskRequestedEvent(state *gen.Workflow
 // processTaskCompletedEvent processes task completed events
 func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
 	if eventData, ok := event.Data.(map[string]interface{}); ok {
-		taskName, _ := eventData["task_name"].(string)
+		// Extract task name - try multiple possible locations
+		var taskName string
+
+		// Method 1: Check if task_name is directly in eventData
+		if name, exists := eventData["task_name"].(string); exists && name != "" {
+			taskName = name
+		}
+
+		// Method 2: Check nested data structure
+		if taskName == "" {
+			if dataSection, exists := eventData["data"].(map[string]interface{}); exists {
+				if name, exists := dataSection["task_name"].(string); exists && name != "" {
+					taskName = name
+				}
+			}
+		}
+
+		// Method 3: Check if it's in a nested event structure
+		if taskName == "" {
+			if eventSection, exists := eventData["event"].(map[string]interface{}); exists {
+				if name, exists := eventSection["task_name"].(string); exists && name != "" {
+					taskName = name
+				}
+			}
+		}
+
+		e.logger.Info("DEBUG: Processing task completed event",
+			"event_id", event.ID,
+			"extracted_task_name", taskName,
+			"current_completed_tasks", len(state.CompletedTasks),
+			"event_data_keys", getMapKeys(eventData))
+
+		// Debug the full event data structure to understand the nesting
+		debugEventData(e.logger, eventData)
 
 		// Remove from pending tasks
 		for i, pendingTask := range state.PendingTasks {
@@ -393,6 +452,13 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 		// Only add if not already completed
 		if !taskAlreadyCompleted {
 			state.CompletedTasks = append(state.CompletedTasks, completedTask)
+			e.logger.Info("DEBUG: Added completed task",
+				"task_name", taskName,
+				"total_completed_tasks", len(state.CompletedTasks))
+		} else {
+			e.logger.Info("DEBUG: Task already completed, skipping duplicate",
+				"task_name", taskName,
+				"total_completed_tasks", len(state.CompletedTasks))
 		}
 	}
 
@@ -604,6 +670,26 @@ func getMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// debugEventData logs the full structure of event data for debugging
+func debugEventData(logger interfaces.Logger, eventData map[string]interface{}) {
+	logger.Info("DEBUG: Full event data structure")
+	for key, value := range eventData {
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			logger.Info("DEBUG: Nested map", "key", key, "nested_keys", getMapKeys(nestedMap))
+			if key == "data" {
+				for nestedKey, nestedValue := range nestedMap {
+					logger.Info("DEBUG: Data field", "nested_key", nestedKey, "value_type", fmt.Sprintf("%T", nestedValue))
+					if nestedKey == "task_name" {
+						logger.Info("DEBUG: Found task_name in data", "task_name", nestedValue)
+					}
+				}
+			}
+		} else {
+			logger.Info("DEBUG: Direct field", "key", key, "value_type", fmt.Sprintf("%T", value), "value", value)
+		}
+	}
+}
+
 // extractTaskNamesFromDSL extracts task names from the DSL definition
 func (e *ServerlessWorkflowEngine) extractTaskNamesFromDSL(definition *gen.WorkflowDefinition) ([]string, error) {
 	if definition.DslDefinition == nil {
@@ -711,7 +797,17 @@ func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.Workflo
 
 							// Handle set task parameters
 							if setConfig, hasSet := taskDefMap["set"]; hasSet {
-								taskInput["set_data"] = setConfig
+								// Evaluate JQ expressions in set task data
+								evaluatedSetConfig, err := e.evaluateSetTaskData(setConfig, state)
+								if err != nil {
+									e.logger.Error("Failed to evaluate JQ expressions in set task",
+										"task_name", taskName,
+										"error", err.Error())
+									// Fallback to original config if evaluation fails
+									taskInput["set_data"] = setConfig
+								} else {
+									taskInput["set_data"] = evaluatedSetConfig
+								}
 							}
 						}
 						break
@@ -815,7 +911,7 @@ func (e *ServerlessWorkflowEngine) executeSetTask(ctx context.Context, task *gen
 	return taskData, nil
 }
 
-// executeWaitTask executes a wait/sleep task
+// executeWaitTask executes a wait/sleep task using event-driven scheduling
 func (e *ServerlessWorkflowEngine) executeWaitTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) (*gen.TaskData, error) {
 	startTime := time.Now()
 
@@ -832,29 +928,43 @@ func (e *ServerlessWorkflowEngine) executeWaitTask(ctx context.Context, task *ge
 		return nil, fmt.Errorf("invalid duration format: %w", err)
 	}
 
-	// Sleep for the specified duration
-	e.logger.Debug("Sleeping for duration", "task_name", task.Name, "duration", duration)
-	time.Sleep(duration)
+	e.logger.Info("Scheduling wait task - workflow will pause",
+		"task_name", task.Name,
+		"duration", duration,
+		"workflow_id", state.WorkflowId,
+		"resume_at", time.Now().Add(duration).Format(time.RFC3339))
 
-	// Create task result
+	// Schedule a delayed event to resume the workflow after the duration
+	if err := e.scheduleDelayedEvent(ctx, state, task, duration); err != nil {
+		return nil, fmt.Errorf("failed to schedule delayed event: %w", err)
+	}
+
+	// Create task result indicating the wait has been scheduled (not completed yet)
 	taskData := &gen.TaskData{
 		Input: task.Input,
 		Output: &structpb.Struct{
 			Fields: map[string]*structpb.Value{
-				"slept_duration": structpb.NewStringValue(duration.String()),
+				"wait_duration": structpb.NewStringValue(duration.String()),
+				"scheduled_at":  structpb.NewStringValue(time.Now().Format(time.RFC3339)),
+				"resume_at":     structpb.NewStringValue(time.Now().Add(duration).Format(time.RFC3339)),
+				"status":        structpb.NewStringValue("waiting"),
 			},
 		},
 		Metadata: &gen.TaskMetadata{
 			StartedAt:   timestamppb.New(startTime),
-			CompletedAt: timestamppb.Now(),
-			DurationMs:  time.Since(startTime).Milliseconds(),
-			Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+			CompletedAt: nil,                                // Not completed yet - will be completed when timer fires
+			DurationMs:  0,                                  // Duration will be calculated when wait completes
+			Status:      gen.TaskStatus_TASK_STATUS_PENDING, // Set to pending status (waiting for timer)
 			TaskType:    task.TaskType,
 			Queue:       task.Queue,
 		},
 	}
 
-	e.logger.Debug("Executed wait task", "task_name", task.Name, "duration", duration)
+	e.logger.Info("Wait task scheduled successfully - workflow paused",
+		"task_name", task.Name,
+		"duration", duration,
+		"workflow_id", state.WorkflowId)
+
 	return taskData, nil
 }
 
@@ -923,6 +1033,130 @@ func (e *ServerlessWorkflowEngine) mapToStruct(data interface{}) *structpb.Struc
 			return structValue
 		}
 	}
+
+	return nil
+}
+
+// evaluateSetTaskData evaluates JQ expressions in set task configuration
+func (e *ServerlessWorkflowEngine) evaluateSetTaskData(setConfig interface{}, state *gen.WorkflowState) (interface{}, error) {
+	// Build workflow context for JQ evaluation
+	workflowContext := e.buildWorkflowContext(state)
+
+	// Convert setConfig to map[string]interface{} for evaluation
+	setConfigMap, ok := setConfig.(map[string]interface{})
+	if !ok {
+		return setConfig, fmt.Errorf("set config is not a map")
+	}
+
+	// Evaluate JQ expressions in the set config
+	evaluatedConfig, err := e.jqEvaluator.EvaluateMap(setConfigMap, workflowContext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate JQ expressions: %w", err)
+	}
+
+	e.logger.Debug("Evaluated set task data",
+		"original", setConfigMap,
+		"evaluated", evaluatedConfig)
+
+	return evaluatedConfig, nil
+}
+
+// buildWorkflowContext builds the workflow context for JQ expression evaluation
+func (e *ServerlessWorkflowEngine) buildWorkflowContext(state *gen.WorkflowState) map[string]interface{} {
+	context := make(map[string]interface{})
+
+	// Add workflow data
+	workflow := make(map[string]interface{})
+
+	// Add workflow input if available
+	if state.Input != nil {
+		workflow["input"] = state.Input.AsMap()
+	}
+
+	// Add workflow variables if available
+	if state.Variables != nil {
+		workflow["variables"] = state.Variables.AsMap()
+	}
+
+	context["workflow"] = workflow
+
+	// Add current timestamp
+	context["now"] = time.Now().Format(time.RFC3339)
+
+	return context
+}
+
+// scheduleDelayedEvent schedules a delayed event to resume the workflow after the wait duration
+func (e *ServerlessWorkflowEngine) scheduleDelayedEvent(ctx context.Context, state *gen.WorkflowState, task *gen.PendingTask, duration time.Duration) error {
+	// For now, we'll use a simple goroutine with time.After to schedule the delayed event
+	// In production, this should use a proper job scheduler like Redis delayed jobs or similar
+
+	e.logger.Info("Scheduling delayed event for wait task",
+		"workflow_id", state.WorkflowId,
+		"task_name", task.Name,
+		"duration", duration,
+		"resume_at", time.Now().Add(duration).Format(time.RFC3339))
+
+	// Start a goroutine to handle the delayed event
+	go func() {
+		// Wait for the specified duration
+		select {
+		case <-time.After(duration):
+			// Duration elapsed - create and publish task completion event
+			e.logger.Info("Wait duration elapsed - completing wait task",
+				"workflow_id", state.WorkflowId,
+				"task_name", task.Name,
+				"duration", duration)
+
+			// Create task completion event
+			completionEvent := &cloudevents.CloudEvent{
+				ID:          fmt.Sprintf("wait-completed-%s-%d", task.Name, time.Now().Unix()),
+				Source:      "worker-service-timer",
+				SpecVersion: "1.0",
+				Type:        "io.flunq.task.completed",
+				TenantID:    state.Context.TenantId,
+				WorkflowID:  state.WorkflowId,
+				ExecutionID: state.Context.ExecutionId,
+				TaskID:      fmt.Sprintf("task-%s", task.Name),
+				Time:        time.Now(),
+				Data: map[string]interface{}{
+					"task_name": task.Name,
+					"task_type": "wait",
+					"data": map[string]interface{}{
+						"input": task.Input.AsMap(),
+						"output": map[string]interface{}{
+							"wait_duration":   duration.String(),
+							"completed_at":    time.Now().Format(time.RFC3339),
+							"wait_successful": true,
+						},
+						"metadata": map[string]interface{}{
+							"started_at":   time.Now().Add(-duration).Format(time.RFC3339),
+							"completed_at": time.Now().Format(time.RFC3339),
+							"duration_ms":  duration.Milliseconds(),
+							"task_type":    "wait",
+							"status":       "completed",
+						},
+					},
+				},
+			}
+
+			// TODO: Publish the completion event to the event stream
+			// This requires access to the event stream interface
+			// For now, we'll log that the wait completed
+			e.logger.Info("Wait task completed - event should be published",
+				"workflow_id", state.WorkflowId,
+				"task_name", task.Name,
+				"event_id", completionEvent.ID,
+				"event_type", completionEvent.Type)
+
+		case <-ctx.Done():
+			// Context cancelled - wait was interrupted
+			e.logger.Warn("Wait task cancelled due to context cancellation",
+				"workflow_id", state.WorkflowId,
+				"task_name", task.Name,
+				"duration", duration)
+		}
+	}()
 
 	return nil
 }

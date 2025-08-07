@@ -8,7 +8,7 @@ The API service provides a professional REST API with OpenAPI 3.0 specification 
 - **Swagger UI**: Interactive API documentation at `/docs`
 - **RESTful Design**: Standard HTTP methods and status codes
 - **Request Validation**: Comprehensive input validation with detailed error messages
-- **Event Integration**: Publishes events to the centralized Event Store
+- **Event Integration**: Publishes events via the unified EventStore interface
 - **Health Checks**: Service health monitoring endpoints
 - **CORS Support**: Cross-origin resource sharing for web clients
 

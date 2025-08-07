@@ -10,11 +10,42 @@ import (
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/events/pkg/client"
-	"github.com/flunq-io/executor/internal/adapters"
 	"github.com/flunq-io/executor/internal/executor"
 	"github.com/flunq-io/executor/internal/processor"
+	"github.com/flunq-io/shared/pkg/eventstreaming"
+	"github.com/flunq-io/shared/pkg/interfaces"
 )
+
+// LoggerAdapter adapts zap.Logger to the shared eventstreaming.Logger interface
+type LoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (l *LoggerAdapter) Debug(msg string, fields ...interface{}) {
+	l.logger.Debug(msg, l.convertFields(fields...)...)
+}
+
+func (l *LoggerAdapter) Info(msg string, fields ...interface{}) {
+	l.logger.Info(msg, l.convertFields(fields...)...)
+}
+
+func (l *LoggerAdapter) Error(msg string, fields ...interface{}) {
+	l.logger.Error(msg, l.convertFields(fields...)...)
+}
+
+func (l *LoggerAdapter) Warn(msg string, fields ...interface{}) {
+	l.logger.Warn(msg, l.convertFields(fields...)...)
+}
+
+func (l *LoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
+	zapFields := make([]zap.Field, 0, len(fields)/2)
+	for i := 0; i < len(fields)-1; i += 2 {
+		if key, ok := fields[i].(string); ok {
+			zapFields = append(zapFields, zap.Any(key, fields[i+1]))
+		}
+	}
+	return zapFields
+}
 
 func main() {
 	// Initialize logger
@@ -26,7 +57,6 @@ func main() {
 
 	zapLogger.Info("Starting Executor Service",
 		zap.String("version", "1.0.0"),
-		zap.String("event_store_url", config.EventStoreURL),
 		zap.String("redis_url", config.RedisURL))
 
 	// Initialize Redis client
@@ -42,12 +72,9 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Initialize Event Store client (for HTTP queries only)
-	eventStoreClient := client.NewEventClient(config.EventStoreURL, "task-service", zapLogger)
-
-	// Initialize adapters
-	eventStore := adapters.NewEventStoreAdapter(eventStoreClient, zapLogger) // HTTP queries only
-	eventStream := adapters.NewRedisEventStream(redisClient, zapLogger)      // Publishing and subscribing
+	// Create logger adapter for shared Redis implementation
+	loggerAdapter := &LoggerAdapter{logger: zapLogger}
+	var eventStream interfaces.EventStream = eventstreaming.NewRedisEventStream(redisClient, loggerAdapter) // Publishing and subscribing
 
 	// Initialize task executors
 	taskExecutors := map[string]executor.TaskExecutor{
@@ -59,7 +86,6 @@ func main() {
 
 	// Initialize task processor
 	taskProcessor := processor.NewTaskProcessor(
-		eventStore,
 		eventStream,
 		taskExecutors,
 		zapLogger,
@@ -98,7 +124,6 @@ func main() {
 
 // Config holds the configuration for the Executor Service
 type Config struct {
-	EventStoreURL string
 	RedisURL      string
 	RedisPassword string
 	LogLevel      string
@@ -109,7 +134,6 @@ type Config struct {
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
 	return &Config{
-		EventStoreURL: getEnv("EVENTS_URL", "http://localhost:8081"),
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		LogLevel:      getEnv("LOG_LEVEL", "info"),

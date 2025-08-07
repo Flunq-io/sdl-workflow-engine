@@ -2,7 +2,6 @@ package processor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,15 +9,15 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
+	sharedinterfaces "github.com/flunq-io/shared/pkg/interfaces"
 	"github.com/flunq-io/worker/internal/interfaces"
 	"github.com/flunq-io/worker/proto/gen"
 )
 
 // WorkflowProcessor implements the core event processing pattern for the Worker service
 type WorkflowProcessor struct {
-	eventStore     interfaces.EventStore
-	eventStream    interfaces.EventStream
+	eventStream    sharedinterfaces.EventStream // Shared event streaming for both subscribing and publishing
 	database       interfaces.Database
 	workflowEngine interfaces.WorkflowEngine
 	serializer     interfaces.ProtobufSerializer
@@ -26,10 +25,11 @@ type WorkflowProcessor struct {
 	metrics        interfaces.Metrics
 
 	// Processing state
-	subscription interfaces.EventStreamSubscription
-	running      bool
-	stopCh       chan struct{}
-	wg           sync.WaitGroup
+	eventCh <-chan *cloudevents.CloudEvent
+	errorCh <-chan error
+	running bool
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
 
 	// Workflow processing locks (one per workflow to prevent concurrent processing)
 	workflowLocks map[string]*sync.Mutex
@@ -38,8 +38,7 @@ type WorkflowProcessor struct {
 
 // NewWorkflowProcessor creates a new workflow processor
 func NewWorkflowProcessor(
-	eventStore interfaces.EventStore,
-	eventStream interfaces.EventStream,
+	eventStream sharedinterfaces.EventStream, // Shared event streaming for both subscribing and publishing
 	database interfaces.Database,
 	workflowEngine interfaces.WorkflowEngine,
 	serializer interfaces.ProtobufSerializer,
@@ -47,7 +46,6 @@ func NewWorkflowProcessor(
 	metrics interfaces.Metrics,
 ) interfaces.WorkflowProcessor {
 	return &WorkflowProcessor{
-		eventStore:     eventStore,
 		eventStream:    eventStream,
 		database:       database,
 		workflowEngine: workflowEngine,
@@ -63,14 +61,16 @@ func NewWorkflowProcessor(
 func (p *WorkflowProcessor) Start(ctx context.Context) error {
 	p.logger.Info("Starting workflow processor")
 
-	// Subscribe to events via EventStream
-	filters := interfaces.EventStreamFilters{
+	// Use shared event streaming for tenant-isolated streams
+	filters := sharedinterfaces.StreamFilters{
 		EventTypes: []string{
 			"io.flunq.workflow.created",
 			"io.flunq.execution.started",
-			"io.flunq.task.completed", // Re-added with smart filtering
+			"io.flunq.task.completed",
 		},
-		WorkflowIDs: []string{}, // Subscribe to all workflows
+		WorkflowIDs:   []string{}, // Subscribe to all workflows
+		ConsumerGroup: fmt.Sprintf("worker-service-%d", time.Now().Unix()),
+		ConsumerName:  fmt.Sprintf("worker-%d", time.Now().Unix()),
 	}
 
 	subscription, err := p.eventStream.Subscribe(ctx, filters)
@@ -78,12 +78,14 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to event stream: %w", err)
 	}
 
-	p.subscription = subscription
+	// Get channels from subscription
+	p.eventCh = subscription.Events()
+	p.errorCh = subscription.Errors()
 	p.running = true
 
 	// Start event processing goroutine
 	p.wg.Add(1)
-	go p.processEventsFromStream(ctx)
+	go p.eventProcessingLoop(ctx)
 
 	p.logger.Info("Workflow processor started successfully")
 	return nil
@@ -96,9 +98,9 @@ func (p *WorkflowProcessor) Stop(ctx context.Context) error {
 	p.running = false
 	close(p.stopCh)
 
-	// Close subscription
-	if p.subscription != nil {
-		p.subscription.Close()
+	// Close event stream connection
+	if p.eventStream != nil {
+		p.eventStream.Close()
 	}
 
 	// Wait for processing to complete
@@ -108,42 +110,11 @@ func (p *WorkflowProcessor) Stop(ctx context.Context) error {
 	return nil
 }
 
-// processEvents processes incoming workflow events
-func (p *WorkflowProcessor) processEvents(ctx context.Context) {
+// eventProcessingLoop processes incoming workflow events from the new EventStore
+func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 	defer p.wg.Done()
 
-	for {
-		select {
-		case <-p.stopCh:
-			return
-		case event := <-p.subscription.Events():
-			if event != nil {
-				if err := p.ProcessWorkflowEvent(ctx, event); err != nil {
-					p.logger.Error("Failed to process workflow event",
-						"event_id", event.ID,
-						"event_type", event.Type,
-						"workflow_id", event.WorkflowID,
-						"error", err)
-					p.metrics.IncrementCounter("workflow_event_processing_errors", map[string]string{
-						"event_type":  event.Type,
-						"workflow_id": event.WorkflowID,
-					})
-				}
-			}
-		case err := <-p.subscription.Errors():
-			if err != nil {
-				p.logger.Error("Event subscription error", "error", err)
-				p.metrics.IncrementCounter("workflow_subscription_errors", nil)
-			}
-		}
-	}
-}
-
-// processEventsFromStream processes events from the EventStream
-func (p *WorkflowProcessor) processEventsFromStream(ctx context.Context) {
-	defer p.wg.Done()
-
-	p.logger.Info("Starting event stream processing")
+	p.logger.Info("Starting event processing loop")
 
 	for {
 		select {
@@ -153,23 +124,31 @@ func (p *WorkflowProcessor) processEventsFromStream(ctx context.Context) {
 		case <-p.stopCh:
 			p.logger.Info("Stop signal received, stopping event processing")
 			return
-		case event := <-p.subscription.Events():
+		case event := <-p.eventCh:
+			p.logger.Info("DEBUG: Received event from eventCh", "event", event != nil)
 			if event != nil {
+				p.logger.Info("DEBUG: Processing non-nil event", "event_type", event.Type, "event_id", event.ID)
 				if err := p.ProcessWorkflowEvent(ctx, event); err != nil {
+					// Extract workflow ID from event extensions
+					workflowID := ""
+					if wfID, ok := event.Extensions["workflowid"].(string); ok {
+						workflowID = wfID
+					}
+
 					p.logger.Error("Failed to process workflow event",
 						"event_id", event.ID,
 						"event_type", event.Type,
-						"workflow_id", event.WorkflowID,
+						"workflow_id", workflowID,
 						"error", err)
 					p.metrics.IncrementCounter("workflow_event_processing_errors", map[string]string{
 						"event_type":  event.Type,
-						"workflow_id": event.WorkflowID,
+						"workflow_id": workflowID,
 					})
 				}
 			}
-		case err := <-p.subscription.Errors():
+		case err := <-p.errorCh:
 			if err != nil {
-				p.logger.Error("Event stream subscription error", "error", err)
+				p.logger.Error("Event store subscription error", "error", err)
 				p.metrics.IncrementCounter("workflow_subscription_errors", nil)
 			}
 		}
@@ -199,9 +178,12 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 	workflowLock.Lock()
 	defer workflowLock.Unlock()
 
-	// Handle workflow.created events differently - create the workflow definition
+	// Skip workflow.created events - the API service already handles workflow creation
 	if event.Type == "io.flunq.workflow.created" {
-		return p.handleWorkflowCreated(ctx, event)
+		p.logger.Debug("Skipping workflow.created event - handled by API service",
+			"event_id", event.ID,
+			"workflow_id", event.WorkflowID)
+		return nil
 	}
 
 	// Skip events published by this worker to prevent infinite loops
@@ -221,10 +203,33 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		return nil
 	}
 
-	// Step 1: Fetch Complete Event History
-	events, err := p.fetchCompleteEventHistory(ctx, event.WorkflowID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch event history: %w", err)
+	// Step 1: Fetch Event History for Current Execution
+	// Use execution-specific filtering to avoid interference between different executions
+	var events []*cloudevents.CloudEvent
+	var err error
+
+	if event.ExecutionID != "" {
+		// Filter events by execution ID to isolate this execution's state
+		events, err = p.fetchEventHistoryForExecution(ctx, event.WorkflowID, event.ExecutionID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch execution-specific event history: %w", err)
+		}
+
+		p.logger.Info("Using execution-specific event filtering",
+			"workflow_id", event.WorkflowID,
+			"execution_id", event.ExecutionID,
+			"filtered_events", len(events))
+	} else {
+		// Fallback to all events if no execution ID (shouldn't happen in normal flow)
+		p.logger.Warn("No execution ID in event, using all workflow events",
+			"event_id", event.ID,
+			"event_type", event.Type,
+			"workflow_id", event.WorkflowID)
+
+		events, err = p.fetchCompleteEventHistory(ctx, event.WorkflowID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch complete event history: %w", err)
+		}
 	}
 
 	// Step 2: Get Workflow Definition
@@ -295,60 +300,73 @@ func (p *WorkflowProcessor) getWorkflowLock(workflowID string) *sync.Mutex {
 func (p *WorkflowProcessor) fetchCompleteEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
 	p.logger.Debug("Fetching complete event history", "workflow_id", workflowID)
 
-	events, err := p.eventStore.GetEventHistory(ctx, workflowID)
+	// Use the shared event streaming to get event history for this workflow
+	// This will automatically discover and read from the correct tenant-specific streams
+	events, err := p.eventStream.GetEventHistory(ctx, workflowID)
 	if err != nil {
-		p.logger.Error("Failed to fetch event history",
+		p.logger.Error("Failed to fetch event history from shared event streaming",
 			"workflow_id", workflowID,
 			"error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch event history: %w", err)
 	}
 
-	p.logger.Debug("Fetched event history",
+	p.logger.Info("Fetched complete event history",
 		"workflow_id", workflowID,
-		"event_count", len(events))
+		"filtered_events", len(events))
 
 	return events, nil
 }
 
-// handleWorkflowCreated processes workflow.created events by storing the workflow definition
-func (p *WorkflowProcessor) handleWorkflowCreated(ctx context.Context, event *cloudevents.CloudEvent) error {
-	p.logger.Info("Handling workflow created event",
-		"workflow_id", event.WorkflowID)
+// fetchEventHistoryForExecution fetches event history filtered by execution ID
+func (p *WorkflowProcessor) fetchEventHistoryForExecution(ctx context.Context, workflowID, executionID string) ([]*cloudevents.CloudEvent, error) {
+	p.logger.Debug("Fetching event history for execution",
+		"workflow_id", workflowID,
+		"execution_id", executionID)
 
-	// Extract workflow definition from event data
-	eventData, ok := event.Data.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid event data format for workflow.created")
-	}
-
-	definitionData, ok := eventData["definition"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("missing or invalid workflow definition in event data")
-	}
-
-	// Parse the workflow definition using the workflow engine
-	definitionJSON, err := json.Marshal(definitionData)
+	// Get all events for the workflow
+	allEvents, err := p.eventStream.GetEventHistory(ctx, workflowID)
 	if err != nil {
-		return fmt.Errorf("failed to marshal workflow definition: %w", err)
+		p.logger.Error("Failed to fetch event history from shared event streaming",
+			"workflow_id", workflowID,
+			"execution_id", executionID,
+			"error", err)
+		return nil, fmt.Errorf("failed to fetch event history: %w", err)
 	}
 
-	definition, err := p.workflowEngine.ParseDefinition(ctx, definitionJSON)
-	if err != nil {
-		return fmt.Errorf("failed to parse workflow definition: %w", err)
+	// Filter events by execution ID (strict filtering - only include events with matching execution ID)
+	var filteredEvents []*cloudevents.CloudEvent
+	for _, event := range allEvents {
+		// Only include events that have the exact execution ID match
+		// Exclude events with empty execution IDs to prevent cross-execution contamination
+		if event.ExecutionID != "" && event.ExecutionID == executionID {
+			filteredEvents = append(filteredEvents, event)
+			p.logger.Info("Including event in execution filter",
+				"event_id", event.ID,
+				"event_type", event.Type,
+				"execution_id", event.ExecutionID)
+		} else if event.ExecutionID == "" {
+			p.logger.Info("Excluding event with empty execution ID",
+				"event_id", event.ID,
+				"event_type", event.Type)
+		} else {
+			p.logger.Info("Excluding event with different execution ID",
+				"event_id", event.ID,
+				"event_type", event.Type,
+				"event_execution_id", event.ExecutionID,
+				"target_execution_id", executionID)
+		}
 	}
 
-	// Store the workflow definition in the database
-	if err := p.database.CreateWorkflow(ctx, definition); err != nil {
-		return fmt.Errorf("failed to store workflow definition: %w", err)
-	}
+	p.logger.Info("Fetched and filtered event history for execution",
+		"workflow_id", workflowID,
+		"execution_id", executionID,
+		"total_events", len(allEvents),
+		"filtered_events", len(filteredEvents))
 
-	p.logger.Info("Workflow definition stored successfully",
-		"workflow_id", definition.Id,
-		"name", definition.Name,
-		"spec_version", definition.SpecVersion)
-
-	return nil
+	return filteredEvents, nil
 }
+
+// NOTE: handleWorkflowCreated method removed - workflow creation is handled by API service only
 
 // getWorkflowDefinition gets the workflow definition from database
 func (p *WorkflowProcessor) getWorkflowDefinition(ctx context.Context, workflowID string) (*gen.WorkflowDefinition, error) {
@@ -417,8 +435,44 @@ func (p *WorkflowProcessor) executeTask(ctx context.Context, task *gen.PendingTa
 		"task_name", task.Name,
 		"task_type", task.TaskType)
 
-	// Send ALL tasks to Executor Service for execution
+	// Handle wait tasks specially - execute locally and set workflow to waiting
+	if task.TaskType == "wait" {
+		return p.executeWaitTaskLocally(ctx, task, state)
+	}
+
+	// Send all other tasks to Executor Service for execution
 	return p.publishTaskRequestedEvent(ctx, task, state)
+}
+
+// executeWaitTaskLocally executes wait tasks locally and sets workflow to waiting status
+func (p *WorkflowProcessor) executeWaitTaskLocally(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
+	p.logger.Info("Executing wait task locally - workflow will pause",
+		"workflow_id", state.WorkflowId,
+		"task_name", task.Name)
+
+	// Execute the wait task using the workflow engine
+	taskData, err := p.workflowEngine.ExecuteTask(ctx, task, state)
+	if err != nil {
+		p.logger.Error("Failed to execute wait task",
+			"workflow_id", state.WorkflowId,
+			"task_name", task.Name,
+			"error", err)
+		return fmt.Errorf("failed to execute wait task: %w", err)
+	}
+
+	// Set workflow status to waiting
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_WAITING
+
+	// Keep the wait task in pending tasks - do NOT add to completed tasks until wait duration has elapsed
+	// The task will remain in PendingTasks until the scheduled timer event completes it
+
+	p.logger.Info("Wait task initiated - workflow is now waiting",
+		"workflow_id", state.WorkflowId,
+		"task_name", task.Name,
+		"workflow_status", "waiting")
+
+	// Publish wait task initiated event
+	return p.publishWaitTaskInitiatedEvent(ctx, task, taskData, state)
 }
 
 // executeLocalTask is deprecated - all tasks are now sent to executor service
@@ -436,11 +490,20 @@ func (p *WorkflowProcessor) executeLocalTask(ctx context.Context, task *gen.Pend
 func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
 	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
 
-	// Get execution ID safely
+	// Get execution ID and tenant ID safely
 	executionID := ""
+	tenantID := ""
 	if state.Context != nil {
 		executionID = state.Context.ExecutionId
+		tenantID = state.Context.TenantId
 	}
+
+	p.logger.Info("DEBUG: Publishing task requested event",
+		"workflow_id", state.WorkflowId,
+		"task_name", task.Name,
+		"execution_id", executionID,
+		"tenant_id", tenantID,
+		"context_exists", state.Context != nil)
 
 	// Extract task-specific parameters from input
 	parameters := make(map[string]interface{})
@@ -480,6 +543,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		Source:      "worker-service",
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.requested",
+		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: executionID,
 		TaskID:      taskID,
@@ -488,6 +552,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			"task_id":      taskID,
 			"task_name":    task.Name,
 			"task_type":    task.TaskType,
+			"tenant_id":    tenantID,
 			"workflow_id":  state.WorkflowId,
 			"execution_id": executionID,
 			"input":        inputData,
@@ -500,7 +565,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		},
 	}
 
-	// Publish event
+	// Publish using the shared event streaming (will auto-route to correct tenant stream)
 	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to publish task requested event: %w", err)
 	}
@@ -542,19 +607,26 @@ func (p *WorkflowProcessor) publishWorkflowCompletedEvent(ctx context.Context, s
 		executionID = state.Context.ExecutionId
 	}
 
+	// Get tenant ID from state context
+	tenantID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+	}
+
 	// Create CloudEvent
 	event := &cloudevents.CloudEvent{
 		ID:          uuid.New().String(),
 		Source:      "worker-service",
 		SpecVersion: "1.0",
 		Type:        "io.flunq.workflow.completed",
+		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: executionID,
 		Time:        time.Now(),
 		Data:        eventData,
 	}
 
-	// Publish event
+	// Publish using the shared event streaming (will auto-route to correct tenant stream)
 	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to publish workflow completed event: %w", err)
 	}
@@ -652,12 +724,19 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 
 // publishTaskScheduledEvent publishes a TaskScheduled event
 func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState) error {
+	// Get tenant ID from state context
+	tenantID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+	}
+
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-scheduled-%s", taskID),
 		Source:      "worker-service",
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.scheduled",
 		Time:        time.Now(),
+		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: state.Context.ExecutionId,
 		TaskID:      taskID,
@@ -672,6 +751,7 @@ func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskI
 		},
 	}
 
+	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
 	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task scheduled event: %w", err)
 	}
@@ -686,12 +766,19 @@ func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskI
 
 // publishTaskStartedEvent publishes a TaskStarted event
 func (p *WorkflowProcessor) publishTaskStartedEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState) error {
+	// Get tenant ID from state context
+	tenantID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+	}
+
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-started-%s", taskID),
 		Source:      "worker-service",
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.started",
 		Time:        time.Now(),
+		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: state.Context.ExecutionId,
 		TaskID:      taskID,
@@ -706,6 +793,7 @@ func (p *WorkflowProcessor) publishTaskStartedEvent(ctx context.Context, taskID 
 		},
 	}
 
+	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
 	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task started event: %w", err)
 	}
@@ -720,12 +808,19 @@ func (p *WorkflowProcessor) publishTaskStartedEvent(ctx context.Context, taskID 
 
 // publishTaskFailedEvent publishes a TaskFailed event
 func (p *WorkflowProcessor) publishTaskFailedEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState, taskErr error, startTime time.Time) error {
+	// Get tenant ID from state context
+	tenantID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+	}
+
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-failed-%s", taskID),
 		Source:      "worker-service",
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.failed",
 		Time:        time.Now(),
+		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: state.Context.ExecutionId,
 		TaskID:      taskID,
@@ -742,6 +837,7 @@ func (p *WorkflowProcessor) publishTaskFailedEvent(ctx context.Context, taskID s
 		},
 	}
 
+	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
 	if err := p.eventStream.Publish(ctx, event); err != nil {
 		return fmt.Errorf("failed to store task failed event: %w", err)
 	}
@@ -751,6 +847,66 @@ func (p *WorkflowProcessor) publishTaskFailedEvent(ctx context.Context, taskID s
 		"task_name", task.Name,
 		"workflow_id", state.WorkflowId,
 		"error", taskErr)
+
+	return nil
+}
+
+// publishWaitTaskInitiatedEvent publishes an event indicating that a wait task has been initiated
+func (p *WorkflowProcessor) publishWaitTaskInitiatedEvent(ctx context.Context, task *gen.PendingTask, taskData *gen.TaskData, state *gen.WorkflowState) error {
+	// Get tenant ID from state context
+	tenantID := ""
+	executionID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+		executionID = state.Context.ExecutionId
+	}
+
+	// Create task ID
+	taskID := fmt.Sprintf("task-%s", task.Name)
+
+	// Create CloudEvent for wait task initiated
+	event := &cloudevents.CloudEvent{
+		ID:          fmt.Sprintf("wait-initiated-%s-%d", task.Name, time.Now().Unix()),
+		Source:      "worker-service",
+		SpecVersion: "1.0",
+		Type:        "io.flunq.task.completed", // Use completed type since wait is "completed" (initiated)
+		TenantID:    tenantID,
+		WorkflowID:  state.WorkflowId,
+		ExecutionID: executionID,
+		TaskID:      taskID,
+		Time:        time.Now(),
+		Data: map[string]interface{}{
+			"task_name": task.Name,
+			"task_type": "wait",
+			"data": map[string]interface{}{
+				"input":  taskData.Input.AsMap(),
+				"output": taskData.Output.AsMap(),
+				"metadata": map[string]interface{}{
+					"started_at":   taskData.Metadata.StartedAt.AsTime().Format(time.RFC3339),
+					"completed_at": nil, // Will be set when wait actually completes
+					"duration_ms":  taskData.Metadata.DurationMs,
+					"task_type":    taskData.Metadata.TaskType,
+					"status":       "waiting", // Special status for wait tasks
+				},
+			},
+		},
+	}
+
+	// Publish the event
+	if err := p.eventStream.Publish(ctx, event); err != nil {
+		p.logger.Error("Failed to publish wait task initiated event",
+			"workflow_id", state.WorkflowId,
+			"task_name", task.Name,
+			"event_id", event.ID,
+			"error", err)
+		return fmt.Errorf("failed to publish wait task initiated event: %w", err)
+	}
+
+	p.logger.Info("Published wait task initiated event",
+		"workflow_id", state.WorkflowId,
+		"task_name", task.Name,
+		"event_id", event.ID,
+		"event_type", event.Type)
 
 	return nil
 }

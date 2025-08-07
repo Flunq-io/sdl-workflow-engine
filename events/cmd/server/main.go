@@ -131,12 +131,24 @@ func setupHTTPRouter(
 	// Event API endpoints
 	v1 := router.Group("/api/v1")
 	{
-		// Event operations
+		// Event operations (workflow-based - backward compatibility)
 		events := v1.Group("/events")
 		{
 			events.POST("", httpHandler.PublishEvent)
 			events.GET("/:workflowId", httpHandler.GetEventHistory)
 			events.GET("/:workflowId/since/:version", httpHandler.GetEventsSince)
+		}
+
+		// Execution-based event operations (new)
+		executions := v1.Group("/executions")
+		{
+			executions.GET("/:executionId/events", httpHandler.GetExecutionHistory)
+		}
+
+		// Workflow execution management (new)
+		workflows := v1.Group("/workflows")
+		{
+			workflows.GET("/:workflowId/executions", httpHandler.GetWorkflowExecutions)
 		}
 
 		// Subscription management

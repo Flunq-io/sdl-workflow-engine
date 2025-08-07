@@ -23,13 +23,17 @@
     "tasks": "Tasks",
     "created": "Created",
     "executions": "Executions",
+    "execution": "Execution",
+    "workflow": "Workflow",
+    "started": "Started",
+    "duration": "Duration",
     "actions": "Actions",
     "cards": "Cards",
     "table": "Table"
   },
   "header": {
     "title": "Flunq.io",
-    "subtitle": "Workflow Engine",
+    "subtitle": "Execution Monitor",
     "toggleTheme": "Toggle theme"
   },
   "navigation": {
@@ -53,6 +57,19 @@
       "running": "Running tasks: {tasks}",
       "default": "{count} tasks: {tasks}"
     }
+  },
+  "executions": {
+    "title": "Workflow Executions",
+    "subtitle": "Monitor and track your workflow execution instances",
+    "noExecutions": "No executions found",
+    "noExecutionsDescription": "No workflow executions have been started yet.",
+    "noExecutionsFiltered": "No executions with status \"{status}\".",
+    "executionId": "Execution ID",
+    "workflowName": "Workflow",
+    "currentStep": "Current Step",
+    "startedAt": "Started",
+    "duration": "Duration",
+    "viewDetails": "View Details"
   },
   "workflowDetail": {
     "backToWorkflows": "Back to Workflows",

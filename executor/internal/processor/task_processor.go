@@ -8,32 +8,29 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
 	"github.com/flunq-io/executor/internal/executor"
-	"github.com/flunq-io/executor/internal/interfaces"
+	"github.com/flunq-io/shared/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/interfaces"
 )
 
 // TaskProcessor processes task execution requests
 type TaskProcessor struct {
-	eventStore    interfaces.EventStore
 	eventStream   interfaces.EventStream
 	taskExecutors map[string]executor.TaskExecutor
 	logger        *zap.Logger
 
-	subscription interfaces.EventStreamSubscription
+	subscription interfaces.StreamSubscription
 	running      bool
 	wg           sync.WaitGroup
 }
 
 // NewTaskProcessor creates a new TaskProcessor
 func NewTaskProcessor(
-	eventStore interfaces.EventStore,
 	eventStream interfaces.EventStream,
 	taskExecutors map[string]executor.TaskExecutor,
 	logger *zap.Logger,
 ) *TaskProcessor {
 	return &TaskProcessor{
-		eventStore:    eventStore,
 		eventStream:   eventStream,
 		taskExecutors: taskExecutors,
 		logger:        logger,
@@ -45,11 +42,13 @@ func (p *TaskProcessor) Start(ctx context.Context) error {
 	p.logger.Info("Starting task processor")
 
 	// Subscribe to task.requested events
-	filters := interfaces.EventStreamFilters{
+	filters := interfaces.StreamFilters{
 		EventTypes: []string{
 			"io.flunq.task.requested",
 		},
-		WorkflowIDs: []string{}, // Subscribe to all workflows
+		WorkflowIDs:   []string{}, // Subscribe to all workflows
+		ConsumerGroup: "executor-service",
+		ConsumerName:  "executor-service-instance",
 	}
 
 	subscription, err := p.eventStream.Subscribe(ctx, filters)
@@ -142,8 +141,8 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 		return fmt.Errorf("task execution failed: %w", err)
 	}
 
-	// Publish task completed event
-	if err := p.publishTaskCompletedEvent(ctx, result); err != nil {
+	// Publish task completed event (pass tenant ID from original event)
+	if err := p.publishTaskCompletedEvent(ctx, result, event.TenantID); err != nil {
 		return fmt.Errorf("failed to publish task completed event: %w", err)
 	}
 
@@ -157,12 +156,13 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 }
 
 // publishTaskCompletedEvent publishes a task completed event
-func (p *TaskProcessor) publishTaskCompletedEvent(ctx context.Context, result *executor.TaskResult) error {
+func (p *TaskProcessor) publishTaskCompletedEvent(ctx context.Context, result *executor.TaskResult, tenantID string) error {
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-completed-%s", result.TaskID),
 		Source:      "executor-service", // Changed from "task-service"
 		SpecVersion: "1.0",
 		Type:        "io.flunq.task.completed",
+		TenantID:    tenantID,           // ← Add tenant ID
 		WorkflowID:  result.WorkflowID,  // ← Add this
 		ExecutionID: result.ExecutionID, // ← Add this
 		TaskID:      result.TaskID,      // ← Add this
@@ -170,6 +170,7 @@ func (p *TaskProcessor) publishTaskCompletedEvent(ctx context.Context, result *e
 		Data: map[string]interface{}{
 			"task_id":     result.TaskID,
 			"task_name":   result.TaskName,
+			"tenant_id":   tenantID,
 			"success":     result.Success,
 			"output":      result.Output,
 			"error":       result.Error,

@@ -1,127 +1,266 @@
-# Event Store Architecture
+# EventStore Architecture
 
-The Event Store service is the **nervous system** of the flunq.io workflow engine. It provides **flexible deployment modes** from pure pub/sub to full HTTP/gRPC APIs.
+The EventStore is the **nervous system** of the flunq.io workflow engine. It provides **Temporal-level resilience** with **pluggable backends** for maximum flexibility.
 
-## 🎯 **You Were Right!** - Deployment Modes
+## 🎯 **New Unified Architecture** - Generic EventStore Interface
 
-The Event Store now supports **3 deployment modes** based on your needs:
+The EventStore is now a **library package** that services import directly, providing:
 
-### 1. **Pure Pub/Sub Mode** (Recommended for High Performance)
-```bash
-ENABLE_HTTP=false ENABLE_GRPC=false MODE=pubsub
-```
-- **No HTTP/gRPC servers** - just Redis connections
-- **Direct Redis pub/sub** for maximum performance
-- **Minimal overhead** - perfect for high-throughput scenarios
-- Services connect directly to Redis using client libraries
-
-### 2. **HTTP Mode** (Recommended for Development/Debugging)
-```bash
-ENABLE_HTTP=true ENABLE_GRPC=false MODE=http
-```
-- **HTTP API** for debugging and monitoring
-- **WebSocket support** for real-time web dashboards
-- **REST endpoints** for manual testing and integration
-- **Swagger UI** for API documentation
-
-### 3. **Full Mode** (Maximum Compatibility)
-```bash
-ENABLE_HTTP=true ENABLE_GRPC=true MODE=full
-```
-- **All interfaces available**: HTTP, WebSocket, gRPC
-- **Maximum compatibility** with different client types
-- **Higher resource usage** but most flexible
+- **🔄 Event Sourcing**: Complete event history with deterministic replay
+- **🛡️ Temporal-level Resilience**: Crash recovery, horizontal scaling, time travel debugging
+- **🔌 Pluggable Backends**: Easy switching between Redis, Kafka, RabbitMQ
+- **⚡ High Performance**: Direct backend access, no HTTP overhead
+- **🎯 Single Source of Truth**: Unified event storage and streaming
 
 ## 🏗️ **Generic Interface Architecture**
 
-### **Clean Abstractions for Easy Backend Switching**
+### **EventStore Interface - The Heart of the System**
 
 ```go
-// Storage Interface - Switch between Redis, PostgreSQL, Kafka
-type EventStorage interface {
-    Store(ctx context.Context, event *CloudEvent) error
-    GetHistory(ctx context.Context, workflowID string) ([]*CloudEvent, error)
-    GetSince(ctx context.Context, workflowID string, since string) ([]*CloudEvent, error)
-    // ... more methods
-}
+// EventStore defines the interface for event storage and streaming
+// This allows pluggable backends (Redis, Kafka, RabbitMQ, etc.)
+type EventStore interface {
+    // Publish publishes an event to a stream
+    Publish(ctx context.Context, stream string, event *CloudEvent) error
 
-// Publisher Interface - Switch between Redis Pub/Sub, Kafka, NATS
-type EventPublisher interface {
-    Publish(ctx context.Context, event *CloudEvent) error
-    Subscribe(ctx context.Context, subscription *Subscription) (EventSubscription, error)
-    // ... more methods
+    // Subscribe subscribes to events from multiple streams
+    // Returns channels for events and errors
+    Subscribe(ctx context.Context, config SubscriptionConfig) (<-chan *CloudEvent, <-chan error, error)
+
+    // ReadHistory reads complete event history for replay/recovery
+    ReadHistory(ctx context.Context, stream string, fromID string) ([]*CloudEvent, error)
+
+    // CreateConsumerGroup creates consumer groups for load balancing
+    CreateConsumerGroup(ctx context.Context, groupName string, streams []string) error
+
+    // Checkpoint management for crash recovery
+    CreateCheckpoint(ctx context.Context, groupName, stream, messageID string) error
+    GetLastCheckpoint(ctx context.Context, groupName, stream string) (string, error)
+
+    // Close closes the event store connection
+    Close() error
 }
 ```
 
 ### **Current Implementations**
-- ✅ **RedisStorage** - Redis Streams for persistence (`events/internal/storage/redis_storage.go`)
-- ✅ **RedisPublisher** - Redis Pub/Sub for real-time distribution (`events/internal/publisher/redis_publisher.go`)
-- ✅ **Generic Interfaces** - Pluggable backends (`shared/pkg/interfaces/`)
 
-### **Planned Implementations**
-- 🚧 **PostgreSQLStorage** - JSONB-based event storage
-- 🚧 **KafkaPublisher** - High-throughput streaming
-- 🚧 **RabbitMQPublisher** - Message queue with routing
-- 🚧 **MongoDBStorage** - Document-based event storage
+#### **✅ Redis EventStore** (`worker/pkg/eventstore/redis/`)
+```go
+// Redis implementation using Redis Streams
+type RedisEventStore struct {
+    client *redis.Client
+    logger eventstore.Logger
+}
 
-### **Service Connection Patterns**
-
-#### **Pure Pub/Sub Mode** (High Performance)
-```
-Services ──► Direct Redis ──► Redis Streams (Storage)
-         └─► Redis Pub/Sub ──► Other Services
+// Create Redis EventStore
+eventStore, err := redis.NewRedisEventStore("redis://localhost:6379", logger)
 ```
 
-#### **HTTP Mode** (Development/Debugging)
+**Features:**
+- **Redis Streams**: High-performance event persistence with ordering guarantees
+- **Consumer Groups**: Load balancing and fault tolerance across multiple workers
+- **Event Filtering**: By event type, workflow ID, and custom criteria
+- **History Replay**: Complete event history from any point in time
+- **Checkpointing**: Automatic crash recovery with last-processed message tracking
+
+#### **🚧 Planned Implementations**
+
+- **KafkaEventStore** - High-throughput distributed streaming
+- **RabbitMQEventStore** - Message queue with advanced routing
+- **PostgreSQLEventStore** - JSONB-based event storage with SQL queries
+- **MongoDBEventStore** - Document-based event storage
+
+### **Service Integration Pattern**
+
 ```
-Services ──► HTTP API ──► Event Store ──► Redis
-Web UI   ──► WebSocket ──► Event Store ──► Redis
+┌─────────────┐    ┌─────────────────┐    ┌─────────────┐
+│   API       │───▶│  EventStore     │◀───│   Worker    │
+│   Service   │    │  Interface      │    │   Service   │
+└─────────────┘    │                 │    └─────────────┘
+                   │ ┌─────────────┐ │
+                   │ │Redis Streams│ │
+                   │ │ (current)   │ │
+                   │ └─────────────┘ │
+                   │                 │
+                   │ ┌─────────────┐ │
+                   │ │   Kafka     │ │
+                   │ │  (future)   │ │
+                   │ └─────────────┘ │
+                   │                 │
+                   │ ┌─────────────┐ │
+                   │ │ RabbitMQ    │ │
+                   │ │  (future)   │ │
+                   │ └─────────────┘ │
+                   └─────────────────┘
 ```
 
-#### **Hybrid Mode** (Production)
+**Benefits:**
+- **Direct Access**: No HTTP overhead, maximum performance
+- **Pluggable**: Easy backend switching via configuration
+- **Resilient**: Built-in crash recovery and event replay
+- **Scalable**: Horizontal scaling with consumer groups
+
+## 🔧 **How to Implement New EventStore Backends**
+
+### **Step 1: Implement the EventStore Interface**
+
+Create a new package under `worker/pkg/eventstore/yourbackend/`:
+
+```go
+package yourbackend
+
+import (
+    "context"
+    "github.com/flunq-io/events/pkg/cloudevents"
+    "github.com/flunq-io/worker/pkg/eventstore"
+)
+
+type YourEventStore struct {
+    // Your backend-specific client/connection
+    client YourBackendClient
+    logger eventstore.Logger
+}
+
+// NewYourEventStore creates a new EventStore implementation
+func NewYourEventStore(connectionString string, logger eventstore.Logger) (eventstore.EventStore, error) {
+    client, err := YourBackendClient.Connect(connectionString)
+    if err != nil {
+        return nil, err
+    }
+
+    return &YourEventStore{
+        client: client,
+        logger: logger,
+    }, nil
+}
+
+// Implement all EventStore interface methods
+func (y *YourEventStore) Publish(ctx context.Context, stream string, event *cloudevents.CloudEvent) error {
+    // Your implementation here
+}
+
+func (y *YourEventStore) Subscribe(ctx context.Context, config eventstore.SubscriptionConfig) (<-chan *cloudevents.CloudEvent, <-chan error, error) {
+    // Your implementation here
+}
+
+// ... implement all other interface methods
 ```
-High-throughput services ──► Direct Redis
-Web clients             ──► HTTP/WebSocket API
-Management tools        ──► HTTP API
+
+### **Step 2: Key Implementation Requirements**
+
+#### **Event Persistence**
+```go
+func (y *YourEventStore) Publish(ctx context.Context, stream string, event *cloudevents.CloudEvent) error {
+    // 1. Serialize CloudEvent to your backend's format
+    data := y.serializeEvent(event)
+
+    // 2. Store with ordering guarantees (critical for event sourcing)
+    messageID, err := y.client.Append(stream, data)
+    if err != nil {
+        return fmt.Errorf("failed to publish event: %w", err)
+    }
+
+    // 3. Log for debugging
+    y.logger.Debug("Published event", "stream", stream, "event_id", event.ID, "message_id", messageID)
+    return nil
+}
 ```
 
-## 🚀 Event Store Service Features
+#### **Event Streaming with Consumer Groups**
+```go
+func (y *YourEventStore) Subscribe(ctx context.Context, config eventstore.SubscriptionConfig) (<-chan *cloudevents.CloudEvent, <-chan error, error) {
+    eventCh := make(chan *cloudevents.CloudEvent, 100)
+    errorCh := make(chan error, 10)
 
-### HTTP API for Event Operations
+    // 1. Create consumer group for load balancing
+    err := y.client.CreateConsumerGroup(config.ConsumerGroup, config.Streams)
+    if err != nil {
+        return nil, nil, err
+    }
 
-- `POST /api/v1/events` - write new events
-- `GET /api/v1/events/{workflowId}` - get event history
-- `GET /api/v1/events/{workflowId}/since/{version}` - incremental updates
+    // 2. Start subscription loop in goroutine
+    go y.subscriptionLoop(ctx, config, eventCh, errorCh)
 
-### WebSocket/gRPC for Real-time Subscriptions
+    return eventCh, errorCh, nil
+}
+```
 
-- Services establish persistent connections
-- Event Store pushes events in real-time
-- Automatic reconnection and event replay on connection loss
-- Subscription filtering and routing
+#### **Event History for Replay**
+```go
+func (y *YourEventStore) ReadHistory(ctx context.Context, stream string, fromID string) ([]*cloudevents.CloudEvent, error) {
+    // 1. Read all events from stream starting at fromID
+    messages, err := y.client.ReadRange(stream, fromID, "end")
+    if err != nil {
+        return nil, err
+    }
 
-### Event Routing Engine
+    // 2. Convert to CloudEvents
+    events := make([]*cloudevents.CloudEvent, 0, len(messages))
+    for _, msg := range messages {
+        event, err := y.deserializeEvent(msg.Data)
+        if err != nil {
+            y.logger.Error("Failed to deserialize event", "error", err)
+            continue
+        }
+        events = append(events, event)
+    }
 
-- Configurable routing rules (which events go to which subscribers)
-- Dead letter queues for failed deliveries
-- Retry logic for temporary subscriber failures
-- Load balancing when multiple instances of same service subscribe
+    return events, nil
+}
+```
 
-## 🔧 Service Startup Pattern
+### **Step 3: Integration with Services**
 
-Each service on startup:
+Update your service's main.go to use the new backend:
 
-1. Connects to Event Store as subscriber
-2. Registers for relevant event types
-3. Requests replay of missed events (if restarting)
-4. Begins processing new events in real-time
+```go
+// main.go
+import "github.com/flunq-io/worker/pkg/eventstore/yourbackend"
 
-## 🛡️ Fault Tolerance
+func main() {
+    // Initialize your EventStore implementation
+    eventStore, err := yourbackend.NewYourEventStore(config.YourBackendURL, logger)
+    if err != nil {
+        logger.Fatal("Failed to initialize event store", "error", err)
+    }
 
-- Event Store persists all events durably
-- Subscribers can reconnect and catch up on missed events
-- Event Store tracks last delivered event per subscriber
-- Services can request full replay if they lose state
+    // Use it in your services
+    workflowProcessor := processor.NewWorkflowProcessor(
+        eventStore,  // ← Your implementation
+        database,
+        workflowEngine,
+        serializer,
+        logger,
+        metrics,
+    )
+}
+```
+
+### **Step 4: Configuration-Driven Backend Selection**
+
+```go
+// config.go
+type Config struct {
+    EventStoreType string // "redis", "kafka", "rabbitmq"
+    RedisURL       string
+    KafkaBootstrapServers string
+    RabbitMQURL    string
+}
+
+// factory.go
+func NewEventStore(config *Config, logger eventstore.Logger) (eventstore.EventStore, error) {
+    switch config.EventStoreType {
+    case "redis":
+        return redis.NewRedisEventStore(config.RedisURL, logger)
+    case "kafka":
+        return kafka.NewKafkaEventStore(config.KafkaBootstrapServers, logger)
+    case "rabbitmq":
+        return rabbitmq.NewRabbitMQEventStore(config.RabbitMQURL, logger)
+    default:
+        return nil, fmt.Errorf("unsupported event store type: %s", config.EventStoreType)
+    }
+}
+```
 
 ## 📋 CloudEvents Standard
 
@@ -143,23 +282,50 @@ All events follow the CloudEvents v1.0 specification with flunq.io extensions:
 }
 ```
 
-## 🔌 Client Integration
+## 🔌 Service Integration
 
-Services use the Event Store client library:
+Services use the EventStore interface directly:
 
 ```go
-// Create client
-eventClient := client.NewEventClient("http://localhost:8081", "my-service", logger)
+// Initialize EventStore (Redis example)
+eventStore, err := redis.NewRedisEventStore("redis://localhost:6379", logger)
+if err != nil {
+    log.Fatal("Failed to initialize event store:", err)
+}
 
 // Publish events
-event := cloudevents.NewWorkflowEvent(id, source, eventType, workflowID)
-event.SetData(data)
-err := eventClient.PublishEvent(ctx, event)
+event := &cloudevents.CloudEvent{
+    ID:          uuid.New().String(),
+    Source:      "io.flunq.worker",
+    SpecVersion: "1.0",
+    Type:        "io.flunq.task.completed",
+    Time:        time.Now(),
+    Extensions: map[string]interface{}{
+        "workflowid":  workflowID,
+        "executionid": executionID,
+    },
+    Data: taskData,
+}
+err = eventStore.Publish(ctx, "events:global", event)
 
 // Subscribe to events
-subscription, err := eventClient.SubscribeWebSocket(ctx, eventTypes, workflowIDs, filters)
-for event := range subscription.Events() {
-    // Process event
+config := eventstore.SubscriptionConfig{
+    Streams:       []string{"events:global"},
+    ConsumerGroup: "worker-service",
+    ConsumerName:  "worker-1",
+    EventTypes:    []string{"io.flunq.task.completed"},
+    FromMessageID: ">",
+    BlockTime:     1 * time.Second,
+}
+
+eventCh, errorCh, err := eventStore.Subscribe(ctx, config)
+for {
+    select {
+    case event := <-eventCh:
+        // Process event
+    case err := <-errorCh:
+        // Handle error
+    }
 }
 ```
 
@@ -184,43 +350,95 @@ for event := range subscription.Events() {
 - `io.flunq.state.exited`
 - `io.flunq.state.error`
 
+## 🛡️ **Temporal-Level Resilience Features**
+
+### **Event Sourcing Pattern**
+- **Complete Event History**: Every workflow event is permanently stored
+- **Deterministic Replay**: Rebuild exact workflow state from events
+- **Time Travel Debugging**: Replay workflow to any point in time
+- **Crash Recovery**: Workers rebuild state from events after restart
+
+### **Horizontal Scaling**
+- **Consumer Groups**: Multiple workers process events in parallel
+- **Load Balancing**: Events distributed across worker instances
+- **Fault Tolerance**: Failed workers don't lose events
+- **Stateless Workers**: No local state, everything rebuilt from events
+
+### **Event Ordering and Consistency**
+- **Stream Ordering**: Events within a stream are totally ordered
+- **Workflow Consistency**: All events for a workflow maintain causal order
+- **Idempotent Processing**: Safe to replay events multiple times
+- **Exactly-Once Delivery**: Consumer groups ensure no duplicate processing
+
 ## 🗄️ Storage Architecture
 
-### Redis Streams Implementation
+### Current Redis Streams Implementation
 
-- **Workflow Streams**: `events:workflow:{workflowId}` - Events for specific workflows
-- **Global Stream**: `events:global` - All events for cross-workflow queries
-- **Subscriber Tracking**: Track last delivered event per subscriber
-- **Event Ordering**: Guaranteed ordering within workflow streams
+- **Global Stream**: `events:global` - All events with workflow filtering
+- **Consumer Groups**: Load balancing across multiple workers
+- **Event Acknowledgment**: Automatic tracking of processed messages
+- **Checkpointing**: Crash recovery with last-processed message tracking
 
-### Event Persistence
+### Event Persistence Structure
 
 ```
-Redis Streams Structure:
-├── events:workflow:workflow-123
-│   ├── 1640995200000-0: {event_data}
-│   ├── 1640995201000-0: {event_data}
-│   └── ...
-├── events:workflow:workflow-456
-│   └── ...
+Redis Streams:
 └── events:global
-    ├── 1640995200000-0: {event_data + workflow_id}
-    ├── 1640995201000-0: {event_data + workflow_id}
+    ├── 1640995200000-0: {workflow_created_event}
+    ├── 1640995201000-0: {task_completed_event}
+    ├── 1640995202000-0: {workflow_completed_event}
     └── ...
+
+Consumer Groups:
+├── worker-service
+│   ├── worker-1: last_processed_id
+│   ├── worker-2: last_processed_id
+│   └── ...
+└── api-service
+    └── api-1: last_processed_id
 ```
 
-## 🔄 Event Replay
+## 🔄 Event Replay and Recovery
 
-Services can request event replay for:
+### **Automatic Crash Recovery**
+```go
+// Worker automatically recovers on startup
+func (p *WorkflowProcessor) Start(ctx context.Context) error {
+    // Get last processed message ID from checkpoint
+    lastID, err := p.eventStore.GetLastCheckpoint(ctx, "worker-service", "events:global")
 
-- **Recovery**: Rebuild state after service restart
-- **Debugging**: Replay events to reproduce issues
-- **Migration**: Replay events to new service versions
-- **Testing**: Replay production events in test environments
+    // Subscribe from that point (or beginning if no checkpoint)
+    config := eventstore.SubscriptionConfig{
+        FromMessageID: lastID, // Resume from last checkpoint
+        // ... other config
+    }
 
-```bash
-# Replay all events for a workflow
-curl -X POST http://localhost:8081/api/v1/admin/replay/workflow-123
+    eventCh, errorCh, err := p.eventStore.Subscribe(ctx, config)
+    // Process events and update checkpoints
+}
+```
+
+### **Manual Event Replay**
+```go
+// Replay events for debugging or migration
+func ReplayWorkflow(eventStore eventstore.EventStore, workflowID string) error {
+    // Read complete event history
+    events, err := eventStore.ReadHistory(ctx, "events:global", "0")
+    if err != nil {
+        return err
+    }
+
+    // Filter events for specific workflow
+    workflowEvents := filterEventsByWorkflowID(events, workflowID)
+
+    // Replay events to rebuild state
+    state := &WorkflowState{}
+    for _, event := range workflowEvents {
+        state = applyEvent(state, event)
+    }
+
+    return nil
+}
 ```
 
 ## 📈 Monitoring and Observability
@@ -246,26 +464,72 @@ curl -X POST http://localhost:8081/api/v1/admin/replay/workflow-123
 
 ## 🚀 Getting Started
 
-1. **Start Redis**:
-   ```bash
-   docker run -d -p 6379:6379 redis:7-alpine
-   ```
+### **1. Start Redis**
+```bash
+docker run -d -p 6379:6379 redis:7-alpine
+```
 
-2. **Configure Environment**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your Redis connection details
-   ```
+### **2. Initialize EventStore in Your Service**
+```go
+package main
 
-3. **Start Event Store**:
-   ```bash
-   cd events
-   go run cmd/server/main.go
-   ```
+import (
+    "context"
+    "log"
+    "github.com/flunq-io/worker/pkg/eventstore/redis"
+)
 
-4. **Connect Services**:
-   ```go
-   eventClient := client.NewEventClient("http://localhost:8081", "my-service", logger)
-   ```
+func main() {
+    // Initialize Redis EventStore
+    eventStore, err := redis.NewRedisEventStore("redis://localhost:6379", logger)
+    if err != nil {
+        log.Fatal("Failed to initialize event store:", err)
+    }
+    defer eventStore.Close()
 
-The Event Store ensures ALL services stay synchronized through events, handles the complexity of distribution, and provides complete auditability and replay capabilities.
+    // Use in your services
+    processor := NewWorkflowProcessor(eventStore, ...)
+    processor.Start(context.Background())
+}
+```
+
+### **3. Publish Events**
+```go
+event := &cloudevents.CloudEvent{
+    ID:          uuid.New().String(),
+    Source:      "io.flunq.worker",
+    Type:        "io.flunq.task.completed",
+    Time:        time.Now(),
+    Extensions:  map[string]interface{}{"workflowid": workflowID},
+    Data:        taskData,
+}
+
+err := eventStore.Publish(ctx, "events:global", event)
+```
+
+### **4. Subscribe to Events**
+```go
+config := eventstore.SubscriptionConfig{
+    Streams:       []string{"events:global"},
+    ConsumerGroup: "my-service",
+    ConsumerName:  "instance-1",
+    EventTypes:    []string{"io.flunq.task.completed"},
+    FromMessageID: ">",
+}
+
+eventCh, errorCh, err := eventStore.Subscribe(ctx, config)
+for event := range eventCh {
+    // Process event
+}
+```
+
+## 🎯 **Key Benefits**
+
+- **🛡️ Temporal-Level Resilience**: Complete event history, crash recovery, deterministic replay
+- **🔌 Pluggable Backends**: Easy switching between Redis, Kafka, RabbitMQ via configuration
+- **⚡ High Performance**: Direct backend access, no HTTP overhead
+- **📈 Horizontal Scaling**: Consumer groups for load balancing across multiple workers
+- **🔍 Complete Auditability**: Every workflow event permanently stored and queryable
+- **🚀 Simple Integration**: Import as library, no separate service to deploy
+
+The EventStore ensures ALL services stay synchronized through events, provides Temporal-level resilience, and offers complete flexibility for future backend changes.

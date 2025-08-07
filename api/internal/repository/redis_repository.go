@@ -32,6 +32,7 @@ func NewRedisWorkflowRepository(client *redis.Client, logger *zap.Logger) *Redis
 type WorkflowData struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
+	TenantID      string                 `json:"tenant_id"`
 	Version       string                 `json:"version"`
 	SpecVersion   string                 `json:"spec_version"`
 	DSLDefinition map[string]interface{} `json:"dsl_definition"`
@@ -43,6 +44,7 @@ func (r *RedisWorkflowRepository) Create(ctx context.Context, workflow *models.W
 	workflowData := WorkflowData{
 		ID:            workflow.ID,
 		Name:          workflow.Name,
+		TenantID:      workflow.TenantID,
 		Version:       "1.0.0",
 		SpecVersion:   "1.0.0",
 		DSLDefinition: workflow.Definition,

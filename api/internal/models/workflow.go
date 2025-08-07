@@ -23,6 +23,7 @@ type Workflow struct {
 	ID          string                 `json:"id" db:"id"`
 	Name        string                 `json:"name" db:"name"`
 	Description string                 `json:"description" db:"description"`
+	TenantID    string                 `json:"tenant_id" db:"tenant_id"`
 	Definition  map[string]interface{} `json:"definition" db:"definition"`
 	Status      WorkflowStatus         `json:"status" db:"status"`
 	Tags        []string               `json:"tags" db:"tags"`
@@ -57,6 +58,7 @@ type TaskExecution struct {
 type CreateWorkflowRequest struct {
 	Name        string                 `json:"name" binding:"required"`
 	Description string                 `json:"description"`
+	TenantID    string                 `json:"tenant_id" binding:"required"`
 	Definition  map[string]interface{} `json:"definition" binding:"required"`
 	Tags        []string               `json:"tags"`
 }
@@ -196,6 +198,7 @@ func (w *Workflow) Clone() *Workflow {
 		ID:          w.ID,
 		Name:        w.Name,
 		Description: w.Description,
+		TenantID:    w.TenantID,
 		Status:      w.Status,
 		Tags:        make([]string, len(w.Tags)),
 		CreatedAt:   w.CreatedAt,

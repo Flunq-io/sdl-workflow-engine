@@ -339,10 +339,60 @@ func (h *WorkflowHandler) GetEvents(c *gin.Context) {
 	}
 
 	response := models.EventHistoryResponse{
+		Events: events,
+		Count:  len(events),
+		Since:  params.Since,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetExecutions handles GET /api/v1/workflows/:id/executions
+func (h *WorkflowHandler) GetExecutions(c *gin.Context) {
+	workflowID := c.Param("id")
+	if workflowID == "" {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"workflow ID is required",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Get all executions for this workflow
+	params := &models.ExecutionListParams{
 		WorkflowID: workflowID,
-		Items:      events,
-		Total:      len(events),
-		Since:      params.Since,
+	}
+
+	executions, total, err := h.workflowService.GetWorkflowExecutions(c.Request.Context(), workflowID, params)
+	if err != nil {
+		h.logger.Error("Failed to get workflow executions",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+
+		if err == services.ErrWorkflowNotFound {
+			c.JSON(http.StatusNotFound, models.NewErrorResponse(
+				models.ErrorCodeWorkflowNotFound,
+				models.MessageWorkflowNotFound,
+			).WithRequestID(getRequestID(c)))
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrorCodeInternalError,
+			models.MessageInternalError,
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Convert to execution IDs for UI compatibility
+	executionIDs := make([]string, len(executions))
+	for i, execution := range executions {
+		executionIDs[i] = execution.ID
+	}
+
+	response := map[string]interface{}{
+		"execution_ids": executionIDs,
+		"count":         total,
 	}
 
 	c.JSON(http.StatusOK, response)

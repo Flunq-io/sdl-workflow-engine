@@ -3,29 +3,35 @@ package interfaces
 import (
 	"context"
 
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // EventStorage defines the interface for event persistence
 type EventStorage interface {
 	// Store persists an event
 	Store(ctx context.Context, event *cloudevents.CloudEvent) error
-	
-	// GetHistory retrieves all events for a workflow
+
+	// GetHistory retrieves all events for a workflow (backward compatibility)
 	GetHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error)
-	
+
+	// GetExecutionHistory retrieves all events for a specific execution
+	GetExecutionHistory(ctx context.Context, executionID string) ([]*cloudevents.CloudEvent, error)
+
+	// GetWorkflowExecutions retrieves all execution IDs for a workflow
+	GetWorkflowExecutions(ctx context.Context, workflowID string) ([]string, error)
+
 	// GetSince retrieves events since a specific version/timestamp
 	GetSince(ctx context.Context, workflowID string, since string) ([]*cloudevents.CloudEvent, error)
-	
+
 	// GetStream retrieves events from a stream
 	GetStream(ctx context.Context, streamID string, count int64) ([]*cloudevents.CloudEvent, error)
-	
+
 	// Delete removes all events for a workflow
 	Delete(ctx context.Context, workflowID string) error
-	
+
 	// GetStats returns storage statistics
 	GetStats(ctx context.Context) (map[string]interface{}, error)
-	
+
 	// Close closes the storage connection
 	Close() error
 }
@@ -34,10 +40,10 @@ type EventStorage interface {
 type EventPublisher interface {
 	// Publish publishes an event to subscribers
 	Publish(ctx context.Context, event *cloudevents.CloudEvent) error
-	
+
 	// Subscribe creates a subscription for events
 	Subscribe(ctx context.Context, subscription *Subscription) (EventSubscription, error)
-	
+
 	// Close closes the publisher
 	Close() error
 }
@@ -46,10 +52,10 @@ type EventPublisher interface {
 type EventSubscription interface {
 	// Events returns the channel for receiving events
 	Events() <-chan *cloudevents.CloudEvent
-	
+
 	// Errors returns the channel for receiving errors
 	Errors() <-chan error
-	
+
 	// Close closes the subscription
 	Close() error
 }
@@ -67,16 +73,16 @@ type Subscription struct {
 type SubscriberManager interface {
 	// AddSubscriber adds a new subscriber
 	AddSubscriber(subscription *Subscription) (string, error)
-	
+
 	// RemoveSubscriber removes a subscriber
 	RemoveSubscriber(subscriberID string) error
-	
+
 	// GetSubscribers returns all active subscribers
 	GetSubscribers() []SubscriberInfo
-	
+
 	// NotifySubscribers notifies relevant subscribers of an event
 	NotifySubscribers(ctx context.Context, event *cloudevents.CloudEvent) error
-	
+
 	// Close closes the subscriber manager
 	Close() error
 }

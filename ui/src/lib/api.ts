@@ -131,6 +131,68 @@ class ApiClient {
   async getExecution(id: string): Promise<Execution> {
     return this.request(`/executions/${id}`)
   }
+
+  // Execution events endpoints (using API service with event sourcing)
+  async getExecutionEvents(executionId: string): Promise<{ events: WorkflowEvent[]; count: number }> {
+    return this.request(`/executions/${executionId}/events`)
+  }
+
+  // Get all executions for a workflow (using API service with event sourcing)
+  async getWorkflowExecutions(workflowId: string): Promise<{ execution_ids: string[]; count: number }> {
+    return this.request(`/workflows/${workflowId}/executions`)
+  }
+
+  // Get all executions across all workflows (combined from multiple sources)
+  async getAllExecutions(params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<Execution & { workflow_name?: string }>> {
+    // First get all workflows to get execution IDs
+    const workflows = await this.getWorkflows({ limit: 100 })
+
+    const allExecutions: (Execution & { workflow_name?: string })[] = []
+
+    // For each workflow, get its executions
+    for (const workflow of workflows.items) {
+      try {
+        const workflowExecutions = await this.getWorkflowExecutions(workflow.id)
+
+        // For each execution ID, try to get execution details from API service
+        for (const executionId of workflowExecutions.execution_ids) {
+          try {
+            const execution = await this.getExecution(executionId)
+            allExecutions.push({
+              ...execution,
+              workflow_name: workflow.name
+            })
+          } catch (error) {
+            // If execution not found in API service, create a minimal execution object
+            allExecutions.push({
+              id: executionId,
+              workflow_id: workflow.id,
+              workflow_name: workflow.name,
+              status: 'pending' as const,
+              started_at: new Date().toISOString(),
+            })
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to get executions for workflow ${workflow.id}:`, error)
+      }
+    }
+
+    // Sort by started_at descending (newest first)
+    allExecutions.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+
+    // Apply pagination
+    const offset = params?.offset || 0
+    const limit = params?.limit || 50
+    const paginatedExecutions = allExecutions.slice(offset, offset + limit)
+
+    return {
+      items: paginatedExecutions,
+      total: allExecutions.length,
+      limit,
+      offset
+    }
+  }
 }
 
 export const apiClient = new ApiClient()

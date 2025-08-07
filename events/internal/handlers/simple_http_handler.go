@@ -8,7 +8,7 @@ import (
 
 	"github.com/flunq-io/events/internal/core"
 	"github.com/flunq-io/events/internal/interfaces"
-	"github.com/flunq-io/events/pkg/cloudevents"
+	"github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 // SimpleHTTPHandler handles HTTP requests for the Event Store using the core interfaces
@@ -90,6 +90,50 @@ func (h *SimpleHTTPHandler) GetEventsSince(c *gin.Context) {
 		"since":       since,
 		"events":      events,
 		"count":       len(events),
+	})
+}
+
+// GetExecutionHistory handles GET /api/v1/executions/:executionId/events
+func (h *SimpleHTTPHandler) GetExecutionHistory(c *gin.Context) {
+	executionID := c.Param("executionId")
+	if executionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "execution_id is required"})
+		return
+	}
+
+	events, err := h.eventStore.GetExecutionHistory(c.Request.Context(), executionID)
+	if err != nil {
+		h.logger.Error("Failed to get execution history", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get execution history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"execution_id": executionID,
+		"events":       events,
+		"count":        len(events),
+	})
+}
+
+// GetWorkflowExecutions handles GET /api/v1/workflows/:workflowId/executions
+func (h *SimpleHTTPHandler) GetWorkflowExecutions(c *gin.Context) {
+	workflowID := c.Param("workflowId")
+	if workflowID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id is required"})
+		return
+	}
+
+	executionIDs, err := h.eventStore.GetWorkflowExecutions(c.Request.Context(), workflowID)
+	if err != nil {
+		h.logger.Error("Failed to get workflow executions", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow executions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"workflow_id":   workflowID,
+		"execution_ids": executionIDs,
+		"count":         len(executionIDs),
 	})
 }
 
