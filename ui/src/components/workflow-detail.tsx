@@ -36,24 +36,14 @@ function extractTaskNames(definition: Record<string, any>): string[] {
   }).filter(Boolean)
 }
 
-function getStatusIcon(status: Workflow['status']) {
-  switch (status) {
-    case 'pending':
-      return <Timer className="h-4 w-4" />
-    case 'running':
-      return <Play className="h-4 w-4" />
-    case 'waiting':
-      return <Clock className="h-4 w-4" />
-    case 'suspended':
-      return <Pause className="h-4 w-4" />
-    case 'cancelled':
-      return <Square className="h-4 w-4" />
-    case 'faulted':
-      return <AlertCircle className="h-4 w-4" />
-    case 'completed':
+function getStateIcon(state: Workflow['state']) {
+  switch (state) {
+    case 'active':
       return <CheckCircle className="h-4 w-4" />
+    case 'inactive':
+      return <Pause className="h-4 w-4" />
     default:
-      return <Timer className="h-4 w-4" />
+      return <CheckCircle className="h-4 w-4" />
   }
 }
 
@@ -115,22 +105,12 @@ function getCurrentTaskIndex(tasks: any[], events: WorkflowEvent[] = []) {
   return Math.max(0, tasks.length - 1)
 }
 
-function getStatusVariant(status: Workflow['status']) {
-  switch (status) {
-    case 'pending':
-      return 'pending' as const
-    case 'running':
-      return 'running' as const
-    case 'waiting':
-      return 'waiting' as const
-    case 'suspended':
-      return 'suspended' as const
-    case 'cancelled':
-      return 'cancelled' as const
-    case 'faulted':
-      return 'faulted' as const
-    case 'completed':
-      return 'completed' as const
+function getStateVariant(state: Workflow['state']) {
+  switch (state) {
+    case 'active':
+      return 'default' as const
+    case 'inactive':
+      return 'secondary' as const
     default:
       return 'default' as const
   }
@@ -144,7 +124,7 @@ export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
   // Debug task statuses
   console.log('=== Task Status Debug ===')
   taskNames.forEach((taskName, index) => {
-    const status = getTaskStatus(taskName, events, index)
+    const status = getTaskStatus(taskName, events)
     console.log(`Task ${index}: ${taskName} = ${status}`)
   })
   console.log(`Current task index: ${currentTaskIndex}`)
@@ -152,15 +132,15 @@ export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
 
   return (
     <div className="space-y-6">
-      {/* Status Card */}
+      {/* State Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Status</CardTitle>
+          <CardTitle className="text-lg">Workflow State</CardTitle>
         </CardHeader>
         <CardContent>
-          <Badge variant={getStatusVariant(workflow.status)} className="flex items-center gap-2 w-fit">
-            {getStatusIcon(workflow.status)}
-            <span className="capitalize">{workflow.status}</span>
+          <Badge variant={getStateVariant(workflow.state)} className="flex items-center gap-2 w-fit">
+            {getStateIcon(workflow.state)}
+            <span className="capitalize">{workflow.state}</span>
           </Badge>
         </CardContent>
       </Card>
@@ -191,7 +171,6 @@ export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
                       <span className={`${
                         taskStatus === 'completed' ? 'text-foreground font-medium' :
                         taskStatus === 'active' ? 'text-foreground font-medium' :
-                        isCurrentTask && workflow.status === 'running' ? 'text-foreground font-medium' :
                         'text-muted-foreground'
                       }`}>
                         {taskName}
@@ -205,14 +184,7 @@ export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
               })}
             </div>
 
-            {workflow.status === 'completed' && (
-              <div className="mt-3 pt-3 border-t">
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <CheckCircle className="h-4 w-4" />
-                  All tasks completed successfully
-                </div>
-              </div>
-            )}
+
           </CardContent>
         </Card>
       )}

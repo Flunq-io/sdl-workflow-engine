@@ -19,6 +19,7 @@ import (
 type WorkflowProcessor struct {
 	eventStream    sharedinterfaces.EventStream // Shared event streaming for both subscribing and publishing
 	database       interfaces.Database
+	sharedDatabase sharedinterfaces.Database // Direct access to shared database for execution updates
 	workflowEngine interfaces.WorkflowEngine
 	serializer     interfaces.ProtobufSerializer
 	logger         interfaces.Logger
@@ -40,6 +41,7 @@ type WorkflowProcessor struct {
 func NewWorkflowProcessor(
 	eventStream sharedinterfaces.EventStream, // Shared event streaming for both subscribing and publishing
 	database interfaces.Database,
+	sharedDatabase sharedinterfaces.Database, // Direct access to shared database for execution updates
 	workflowEngine interfaces.WorkflowEngine,
 	serializer interfaces.ProtobufSerializer,
 	logger interfaces.Logger,
@@ -48,6 +50,7 @@ func NewWorkflowProcessor(
 	return &WorkflowProcessor{
 		eventStream:    eventStream,
 		database:       database,
+		sharedDatabase: sharedDatabase,
 		workflowEngine: workflowEngine,
 		serializer:     serializer,
 		logger:         logger,
@@ -125,9 +128,9 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 			p.logger.Info("Stop signal received, stopping event processing")
 			return
 		case event := <-p.eventCh:
-			p.logger.Info("DEBUG: Received event from eventCh", "event", event != nil)
+			p.logger.Debug("Received event from eventCh", "event_present", event != nil)
 			if event != nil {
-				p.logger.Info("DEBUG: Processing non-nil event", "event_type", event.Type, "event_id", event.ID)
+				p.logger.Debug("Processing event", "event_type", event.Type, "event_id", event.ID)
 				if err := p.ProcessWorkflowEvent(ctx, event); err != nil {
 					// Extract workflow ID from event extensions
 					workflowID := ""
@@ -168,8 +171,8 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		"event_type", event.Type,
 		"workflow_id", event.WorkflowID)
 
-	// DEBUG: Print event data structure
-	p.logger.Info("DEBUG: Event data",
+	// Event data (debug)
+	p.logger.Debug("Event data",
 		"data_type", fmt.Sprintf("%T", event.Data),
 		"data_value", event.Data)
 
@@ -194,9 +197,9 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		return nil
 	}
 
-	// Only process task.completed events from executor-service
-	if event.Type == "io.flunq.task.completed" && event.Source != "executor-service" {
-		p.logger.Debug("Skipping task.completed event from non-executor source",
+	// Only process task.completed events from executor-service or workflow-engine (for wait tasks)
+	if event.Type == "io.flunq.task.completed" && event.Source != "executor-service" && event.Source != "workflow-engine" {
+		p.logger.Debug("Skipping task.completed event from non-executor/non-engine source",
 			"event_id", event.ID,
 			"source", event.Source,
 			"workflow_id", event.WorkflowID)
@@ -232,11 +235,26 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		}
 	}
 
-	// Step 2: Get Workflow Definition
-	definition, err := p.getWorkflowDefinition(ctx, event.WorkflowID)
+	// Step 2: Get Workflow Definition (with tenant context from event)
+	p.logger.Info("Getting workflow definition with tenant context",
+		"workflow_id", event.WorkflowID,
+		"tenant_id", event.TenantID,
+		"event_type", event.Type)
+
+	definition, err := p.getWorkflowDefinitionWithTenant(ctx, event.TenantID, event.WorkflowID)
 	if err != nil {
+		p.logger.Error("Failed to get workflow definition",
+			"workflow_id", event.WorkflowID,
+			"tenant_id", event.TenantID,
+			"error", err)
 		return fmt.Errorf("failed to get workflow definition: %w", err)
 	}
+
+	p.logger.Info("Successfully retrieved workflow definition",
+		"workflow_id", event.WorkflowID,
+		"tenant_id", event.TenantID,
+		"definition_name", definition.Name,
+		"definition_id", definition.Id)
 
 	// Step 3: Rebuild Complete Workflow State
 	state, err := p.rebuildCompleteWorkflowState(ctx, definition, events)
@@ -381,6 +399,25 @@ func (p *WorkflowProcessor) getWorkflowDefinition(ctx context.Context, workflowI
 	return definition, nil
 }
 
+// getWorkflowDefinitionWithTenant gets the workflow definition with tenant context
+func (p *WorkflowProcessor) getWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*gen.WorkflowDefinition, error) {
+	// Use the tenant-aware method for efficient lookup
+	definition, err := p.database.GetWorkflowDefinitionWithTenant(ctx, tenantID, workflowID)
+	if err != nil {
+		p.logger.Error("Failed to get workflow definition with tenant",
+			"workflow_id", workflowID,
+			"tenant_id", tenantID,
+			"error", err)
+		return nil, err
+	}
+
+	p.logger.Info("Retrieved workflow definition with tenant context",
+		"workflow_id", workflowID,
+		"tenant_id", tenantID,
+		"workflow_name", definition.Name)
+	return definition, nil
+}
+
 // rebuildCompleteWorkflowState rebuilds the complete workflow state from event history
 func (p *WorkflowProcessor) rebuildCompleteWorkflowState(ctx context.Context, definition *gen.WorkflowDefinition, events []*cloudevents.CloudEvent) (*gen.WorkflowState, error) {
 	p.logger.Debug("Rebuilding workflow state from events",
@@ -498,7 +535,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		tenantID = state.Context.TenantId
 	}
 
-	p.logger.Info("DEBUG: Publishing task requested event",
+	p.logger.Debug("Publishing task requested event",
 		"workflow_id", state.WorkflowId,
 		"task_name", task.Name,
 		"execution_id", executionID,
@@ -635,9 +672,54 @@ func (p *WorkflowProcessor) publishWorkflowCompletedEvent(ctx context.Context, s
 	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED
 	state.UpdatedAt = timestamppb.Now()
 
+	// Update execution status in database
+	if err := p.updateExecutionStatus(ctx, executionID, tenantID, state); err != nil {
+		p.logger.Error("Failed to update execution status",
+			"execution_id", executionID,
+			"workflow_id", state.WorkflowId,
+			"error", err)
+		// Don't fail the workflow completion, just log the error
+	}
+
 	p.logger.Info("Published workflow completed event",
 		"workflow_id", state.WorkflowId,
 		"event_id", event.ID)
+
+	return nil
+}
+
+// updateExecutionStatus updates the execution status when workflow completes
+func (p *WorkflowProcessor) updateExecutionStatus(ctx context.Context, executionID, tenantID string, state *gen.WorkflowState) error {
+	if executionID == "" {
+		return fmt.Errorf("execution ID is empty")
+	}
+
+	// Get current execution from database
+	execution, err := p.sharedDatabase.GetExecution(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("failed to get execution %s: %w", executionID, err)
+	}
+
+	// Update execution status and completion time
+	now := time.Now()
+	execution.Status = sharedinterfaces.WorkflowStatusCompleted
+	execution.CompletedAt = &now
+	execution.Duration = now.Sub(execution.StartedAt)
+
+	// Set output if available
+	if state.Output != nil {
+		execution.Output = state.Output.AsMap()
+	}
+
+	// Update execution in database
+	if err := p.sharedDatabase.UpdateExecution(ctx, executionID, execution); err != nil {
+		return fmt.Errorf("failed to update execution %s: %w", executionID, err)
+	}
+
+	p.logger.Info("Updated execution status to completed",
+		"execution_id", executionID,
+		"workflow_id", state.WorkflowId,
+		"duration", execution.Duration)
 
 	return nil
 }
@@ -670,19 +752,24 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 		"current_step", state.CurrentStep,
 		"status", state.Status)
 
-	// Check if workflow is complete
-	if p.workflowEngine.IsWorkflowComplete(ctx, state, definition) {
-		p.logger.Info("Workflow is complete",
-			"workflow_id", state.WorkflowId,
-			"status", state.Status)
+	// For DSL 1.0.0 workflows, skip status-based completion check
+	// Let GetNextTask() determine completion instead
+	dslMap := definition.DslDefinition.AsMap()
+	if _, hasDoSection := dslMap["do"]; !hasDoSection {
+		// Legacy DSL 0.8 format - use status-based completion
+		if p.workflowEngine.IsWorkflowComplete(ctx, state, definition) {
+			p.logger.Info("Workflow is complete",
+				"workflow_id", state.WorkflowId,
+				"status", state.Status)
 
-		// Publish workflow completed event if not already completed
-		if state.Status != gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED {
-			if err := p.publishWorkflowCompletedEvent(ctx, state); err != nil {
-				return fmt.Errorf("failed to publish workflow completed event: %w", err)
+			// Publish workflow completed event if not already completed
+			if state.Status != gen.WorkflowStatus_WORKFLOW_STATUS_COMPLETED {
+				if err := p.publishWorkflowCompletedEvent(ctx, state); err != nil {
+					return fmt.Errorf("failed to publish workflow completed event: %w", err)
+				}
 			}
+			return nil
 		}
-		return nil
 	}
 
 	// Get next task to execute using SDK (following Java pattern - execute ONE task per event)
@@ -696,6 +783,23 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 	}
 
 	if nextTask == nil {
+		// Guard against premature completion for DSL 1.0.0 (task-based)
+		dslMap := definition.DslDefinition.AsMap()
+		if doSection, ok := dslMap["do"].([]interface{}); ok {
+			totalTasks := len(doSection)
+			completed := len(state.CompletedTasks)
+			pending := len(state.PendingTasks)
+
+			if pending > 0 || completed < totalTasks {
+				p.logger.Info("No new task to request yet; waiting for pending/completions",
+					"workflow_id", state.WorkflowId,
+					"completed_tasks", completed,
+					"total_tasks", totalTasks,
+					"pending_tasks", pending)
+				return nil // Do not mark workflow completed yet
+			}
+		}
+
 		p.logger.Info("No more tasks to execute - workflow completed",
 			"workflow_id", state.WorkflowId,
 			"current_step", state.CurrentStep)

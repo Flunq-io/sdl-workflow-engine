@@ -131,6 +131,15 @@ func (r *RedisDatabase) GetWorkflowDefinition(ctx context.Context, workflowID st
 	return &definition, nil
 }
 
+// GetWorkflowDefinitionWithTenant retrieves the workflow definition with tenant context
+// Note: This old Redis adapter doesn't support tenant scoping, so it falls back to the regular method
+func (r *RedisDatabase) GetWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*gen.WorkflowDefinition, error) {
+	r.logger.Warn("Old Redis adapter doesn't support tenant scoping, falling back to regular lookup",
+		"tenant_id", tenantID,
+		"workflow_id", workflowID)
+	return r.GetWorkflowDefinition(ctx, workflowID)
+}
+
 // DeleteWorkflow deletes a workflow and its state
 func (r *RedisDatabase) DeleteWorkflow(ctx context.Context, workflowID string) error {
 	// Delete both definition and state

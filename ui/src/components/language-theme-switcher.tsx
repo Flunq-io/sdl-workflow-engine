@@ -1,7 +1,6 @@
 "use client"
 
 import { useTheme } from "next-themes"
-import { useLocale, useTranslations } from "next-intl"
 import { useRouter, usePathname } from "next/navigation"
 import {
   DropdownMenu,
@@ -32,22 +31,27 @@ const languages = [
 
 export function LanguageThemeSwitcher() {
   const { theme, setTheme } = useTheme()
-  const locale = useLocale()
   const router = useRouter()
   const pathname = usePathname()
-  const t = useTranslations()
+
+  // Extract locale from pathname (format: /tenant/locale/...)
+  const pathSegments = pathname.split('/').filter(Boolean)
+  const locale = pathSegments.length >= 2 ? pathSegments[1] : 'en'
+  const tenant = pathSegments.length >= 1 ? pathSegments[0] : 'acme-inc'
 
   const currentLanguage = languages.find(lang => lang.code === locale)
 
   const switchLanguage = (newLocale: string) => {
-    // Remove current locale from pathname and add new one
-    const segments = pathname.split('/')
-    if (segments[1] && ['en', 'fr', 'de', 'es', 'zh', 'nl'].includes(segments[1])) {
-      segments[1] = newLocale
+    // Update the locale in the URL (format: /tenant/locale/...)
+    const segments = pathname.split('/').filter(Boolean)
+    if (segments.length >= 2) {
+      segments[1] = newLocale // Replace locale
+    } else if (segments.length === 1) {
+      segments.push(newLocale) // Add locale
     } else {
-      segments.splice(1, 0, newLocale)
+      segments.push(tenant, newLocale) // Add both tenant and locale
     }
-    router.push(segments.join('/'))
+    router.push('/' + segments.join('/'))
   }
 
   const getThemeIcon = () => {
@@ -72,7 +76,7 @@ export function LanguageThemeSwitcher() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>{t('language.select')}</DropdownMenuLabel>
+          <DropdownMenuLabel>Select language</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {languages.map((language) => (
             <DropdownMenuItem
@@ -100,19 +104,19 @@ export function LanguageThemeSwitcher() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>{t('header.toggleTheme')}</DropdownMenuLabel>
+            <DropdownMenuLabel>Toggle theme</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setTheme('light')}>
               <Sun className="mr-2 h-4 w-4" />
-              {t('theme.light')}
+              Light
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setTheme('dark')}>
               <Moon className="mr-2 h-4 w-4" />
-              {t('theme.dark')}
+              Dark
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setTheme('system')}>
               <Monitor className="mr-2 h-4 w-4" />
-              {t('theme.system')}
+              System
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

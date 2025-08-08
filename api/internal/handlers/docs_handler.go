@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 )
@@ -67,7 +68,8 @@ func (h *DocsHandler) SwaggerUI(c *gin.Context) {
 
 // OpenAPISpec serves the OpenAPI specification file
 func (h *DocsHandler) OpenAPISpec(c *gin.Context) {
-	// In a real implementation, you would read this from the file system
-	// For now, we'll redirect to the static file
-	c.File("docs/openapi.yaml")
+	// Serve the OpenAPI spec file from the docs directory
+	// The path is relative to the API server's working directory
+	specPath := filepath.Join("docs", "openapi.yaml")
+	c.File(specPath)
 }

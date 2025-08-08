@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
 console.log('🌍 Environment NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL)
 console.log('🎯 Final API_BASE_URL:', API_BASE_URL)
@@ -8,7 +8,7 @@ export interface Workflow {
   name: string
   description: string
   definition: Record<string, any>
-  status: 'pending' | 'running' | 'waiting' | 'suspended' | 'cancelled' | 'faulted' | 'completed'
+  state: 'active' | 'inactive'
   tags: string[]
   created_at: string
   updated_at: string
@@ -64,14 +64,18 @@ export interface PaginatedResponse<T> {
 
 class ApiClient {
   private baseUrl: string
+  private tenantId?: string
 
-  constructor(baseUrl: string = API_BASE_URL) {
+  constructor(baseUrl: string = API_BASE_URL, tenantId?: string) {
     this.baseUrl = baseUrl
-    console.log('🔧 API Client initialized with baseUrl:', this.baseUrl)
+    this.tenantId = tenantId
+    console.log('🔧 API Client initialized with baseUrl:', this.baseUrl, 'tenantId:', tenantId)
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`
+    // Build URL with tenant context if available
+    const apiPath = this.tenantId ? `/api/v1/${this.tenantId}${endpoint}` : `/api/v1${endpoint}`
+    const url = `${this.baseUrl}${apiPath}`
 
     console.log('🔍 API Request:', url)
 
@@ -106,6 +110,16 @@ class ApiClient {
 
   async getWorkflow(id: string): Promise<Workflow> {
     return this.request(`/workflows/${id}`)
+  }
+
+  async executeWorkflow(id: string, input: any, correlationId?: string): Promise<Execution> {
+    return this.request(`/workflows/${id}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        input,
+        correlation_id: correlationId,
+      }),
+    })
   }
 
   async getWorkflowEvents(id: string, params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<WorkflowEvent>> {
@@ -196,3 +210,8 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient()
+
+// Helper function to create tenant-aware API client
+export function createTenantApiClient(tenantId: string): ApiClient {
+  return new ApiClient(API_BASE_URL, tenantId)
+}

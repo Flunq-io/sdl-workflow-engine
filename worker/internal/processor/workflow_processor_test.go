@@ -11,44 +11,39 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/flunq-io/shared/pkg/cloudevents"
+	sharedinterfaces "github.com/flunq-io/shared/pkg/interfaces"
 	"github.com/flunq-io/worker/internal/interfaces"
 	"github.com/flunq-io/worker/proto/gen"
 )
 
-// MockEventStore is a mock implementation of EventStore interface
-type MockEventStore struct {
-	mock.Mock
+// FakeEventStream is a simple test double for the shared EventStream
+// It only implements the methods we need for this unit test
+// (GetEventHistory and no-op Publish/Close)
+type FakeEventStream struct {
+	Events []*cloudevents.CloudEvent
 }
 
-func (m *MockEventStore) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
-	args := m.Called(ctx, workflowID)
-	return args.Get(0).([]*cloudevents.CloudEvent), args.Error(1)
+// Use the shared interfaces package for proper typing
+// Note: Subscribe/CreateConsumerGroup/DeleteConsumerGroup are not used in this test
+func (f *FakeEventStream) Subscribe(ctx context.Context, filters sharedinterfaces.StreamFilters) (sharedinterfaces.StreamSubscription, error) {
+	return nil, nil
 }
 
-func (m *MockEventStore) PublishEvent(ctx context.Context, event *cloudevents.CloudEvent) error {
-	args := m.Called(ctx, event)
-	return args.Error(0)
+func (f *FakeEventStream) Publish(ctx context.Context, event *cloudevents.CloudEvent) error {
+	return nil
 }
 
-// MockEventStream is a mock implementation of EventStream interface
-type MockEventStream struct {
-	mock.Mock
+func (f *FakeEventStream) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
+	return f.Events, nil
 }
 
-func (m *MockEventStream) Subscribe(ctx context.Context, filters interfaces.EventStreamFilters) (interfaces.EventStreamSubscription, error) {
-	args := m.Called(ctx, filters)
-	return args.Get(0).(interfaces.EventStreamSubscription), args.Error(1)
+func (f *FakeEventStream) CreateConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
 }
-
-func (m *MockEventStream) Publish(ctx context.Context, event *cloudevents.CloudEvent) error {
-	args := m.Called(ctx, event)
-	return args.Error(0)
+func (f *FakeEventStream) DeleteConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
 }
-
-func (m *MockEventStream) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
+func (f *FakeEventStream) Close() error { return nil }
 
 // MockDatabase is a mock implementation of Database interface
 type MockDatabase struct {
@@ -232,24 +227,11 @@ func (m *MockMetrics) StartTimer(name string, tags map[string]string) func() {
 
 func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 	// Setup mocks
-	mockEventStore := &MockEventStore{}
-	mockEventStream := &MockEventStream{}
 	mockDatabase := &MockDatabase{}
 	mockEngine := &MockWorkflowEngine{}
 	mockSerializer := &MockSerializer{}
 	mockLogger := &MockLogger{}
 	mockMetrics := &MockMetrics{}
-
-	// Create processor
-	processor := NewWorkflowProcessor(
-		mockEventStore,
-		mockEventStream,
-		mockDatabase,
-		mockEngine,
-		mockSerializer,
-		mockLogger,
-		mockMetrics,
-	)
 
 	ctx := context.Background()
 	workflowID := "test-workflow-123"
@@ -312,7 +294,6 @@ func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 	mockMetrics.On("StartTimer", "workflow_event_processing_duration", mock.AnythingOfType("map[string]string")).Return(func() {})
 	mockLogger.On("Info", "Processing workflow event", mock.Anything).Return()
 	mockLogger.On("Debug", mock.AnythingOfType("string"), mock.Anything).Return()
-	mockEventStore.On("GetEventHistory", ctx, workflowID).Return([]*cloudevents.CloudEvent{event}, nil)
 	mockDatabase.On("GetWorkflowDefinition", ctx, workflowID).Return(definition, nil)
 	mockEngine.On("RebuildState", ctx, definition, mock.AnythingOfType("[]*cloudevents.CloudEvent")).Return(state, nil)
 	mockEngine.On("ProcessEvent", ctx, state, event).Return(nil)
@@ -327,7 +308,6 @@ func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
-	mockEventStore.AssertExpectations(t)
 	mockDatabase.AssertExpectations(t)
 	mockEngine.AssertExpectations(t)
 	mockLogger.AssertExpectations(t)

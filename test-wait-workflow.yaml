@@ -1,0 +1,29 @@
+document:
+  dsl: '1.0.0'
+  namespace: flunq.io
+  name: test-wait-workflow
+  version: '1.0.0'
+  description: Test workflow with event-driven wait task
+
+do:
+  - log-start:
+      call: http
+      with:
+        uri: https://httpbin.org/post
+        method: post
+        body:
+          message: "Starting workflow with wait task"
+          timestamp: ${ now() }
+  
+  - wait-5-seconds:
+      wait: 5s
+  
+  - log-after-wait:
+      call: http
+      with:
+        uri: https://httpbin.org/post
+        method: post
+        body:
+          message: "Wait completed successfully"
+          timestamp: ${ now() }
+          waited_duration: "5s"

@@ -58,6 +58,7 @@ type ExecutionListParams struct {
 	PaginationParams
 	WorkflowID string `form:"workflow_id"`
 	Status     string `form:"status" binding:"omitempty,oneof=pending running completed failed cancelled"`
+	TenantID   string // Will be extracted from path parameter
 }
 
 // EventHistoryParams represents parameters for getting event history

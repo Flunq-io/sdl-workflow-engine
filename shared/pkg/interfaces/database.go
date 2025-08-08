@@ -11,15 +11,13 @@ type Database interface {
 	// Workflow operations
 	CreateWorkflow(ctx context.Context, workflow *WorkflowDefinition) error
 	GetWorkflowDefinition(ctx context.Context, workflowID string) (*WorkflowDefinition, error)
+	GetWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*WorkflowDefinition, error)
 	UpdateWorkflowDefinition(ctx context.Context, workflowID string, workflow *WorkflowDefinition) error
 	DeleteWorkflow(ctx context.Context, workflowID string) error
+	DeleteWorkflowWithTenant(ctx context.Context, tenantID, workflowID string) error
 	ListWorkflows(ctx context.Context, filters WorkflowFilters) ([]*WorkflowDefinition, error)
 
-	// Workflow state operations
-	CreateWorkflowState(ctx context.Context, workflowID string, state *WorkflowState) error
-	GetWorkflowState(ctx context.Context, workflowID string) (*WorkflowState, error)
-	UpdateWorkflowState(ctx context.Context, workflowID string, state *WorkflowState) error
-	DeleteWorkflowState(ctx context.Context, workflowID string) error
+	// NOTE: Workflow state operations have been removed in favor of execution-based storage
 
 	// Execution operations
 	CreateExecution(ctx context.Context, execution *WorkflowExecution) error
@@ -85,13 +83,13 @@ type WorkflowExecution struct {
 
 // TaskDefinition represents a task definition
 type TaskDefinition struct {
-	ID          string                 `json:"id"`
-	WorkflowID  string                 `json:"workflow_id"`
-	Name        string                 `json:"name"`
-	Type        string                 `json:"type"`
-	Definition  map[string]interface{} `json:"definition"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID         string                 `json:"id"`
+	WorkflowID string                 `json:"workflow_id"`
+	Name       string                 `json:"name"`
+	Type       string                 `json:"type"`
+	Definition map[string]interface{} `json:"definition"`
+	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
 }
 
 // WorkflowStatus represents workflow execution status
@@ -139,7 +137,7 @@ type DatabaseStats struct {
 
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
-	Type         string            `json:"type"`          // postgresql, mongodb, dynamodb, etc.
+	Type         string            `json:"type"` // postgresql, mongodb, dynamodb, etc.
 	Host         string            `json:"host"`
 	Port         int               `json:"port"`
 	Database     string            `json:"database"`
@@ -148,6 +146,6 @@ type DatabaseConfig struct {
 	SSLMode      string            `json:"ssl_mode"`
 	MaxConns     int               `json:"max_conns"`
 	MaxIdleConns int               `json:"max_idle_conns"`
-	Options      map[string]string `json:"options"`       // Additional database-specific options
-	TenantMode   bool              `json:"tenant_mode"`   // Enable multi-tenant isolation
+	Options      map[string]string `json:"options"`     // Additional database-specific options
+	TenantMode   bool              `json:"tenant_mode"` // Enable multi-tenant isolation
 }

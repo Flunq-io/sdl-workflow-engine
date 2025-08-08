@@ -22,6 +22,7 @@ const (
 type Execution struct {
 	ID            string                 `json:"id" db:"id"`
 	WorkflowID    string                 `json:"workflow_id" db:"workflow_id"`
+	TenantID      string                 `json:"tenant_id" db:"tenant_id"`
 	Status        ExecutionStatus        `json:"status" db:"status"`
 	CorrelationID string                 `json:"correlation_id,omitempty" db:"correlation_id"`
 	Input         map[string]interface{} `json:"input,omitempty" db:"input"`
@@ -44,6 +45,7 @@ type ExecutionError struct {
 type ExecuteWorkflowRequest struct {
 	Input         map[string]interface{} `json:"input"`
 	CorrelationID string                 `json:"correlation_id,omitempty"`
+	TenantID      string                 // Will be extracted from path parameter
 }
 
 // ExecutionResponse represents the response when starting an execution
@@ -58,10 +60,10 @@ type ExecutionResponse struct {
 
 // ExecutionListResponse represents the response for listing executions
 type ExecutionListResponse struct {
-	Executions []ExecutionResponse `json:"executions"`
-	Total      int                 `json:"total"`
-	Limit      int                 `json:"limit"`
-	Offset     int                 `json:"offset"`
+	Items  []ExecutionResponse `json:"items"`
+	Total  int                 `json:"total"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
 }
 
 // CancelExecutionRequest represents the request to cancel an execution

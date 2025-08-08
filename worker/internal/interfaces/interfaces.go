@@ -55,6 +55,9 @@ type Database interface {
 	// GetWorkflowDefinition retrieves the workflow definition
 	GetWorkflowDefinition(ctx context.Context, workflowID string) (*gen.WorkflowDefinition, error)
 
+	// GetWorkflowDefinitionWithTenant retrieves the workflow definition with tenant context
+	GetWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*gen.WorkflowDefinition, error)
+
 	// DeleteWorkflow deletes a workflow and its state
 	DeleteWorkflow(ctx context.Context, workflowID string) error
 

@@ -238,13 +238,24 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// Execute handles POST /api/v1/workflows/:id/execute
+// Execute handles POST /api/v1/:tenant_id/workflows/:id/execute
 func (h *WorkflowHandler) Execute(c *gin.Context) {
 	workflowID := c.Param("id")
 	if workflowID == "" {
 		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
 			models.ErrorCodeValidation,
 			"workflow ID is required",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Extract tenant_id from path parameter
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		h.logger.Error("Missing tenant_id in path")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"Missing tenant_id in path",
 		).WithRequestID(getRequestID(c)))
 		return
 	}
@@ -260,6 +271,9 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		}).WithRequestID(getRequestID(c)))
 		return
 	}
+
+	// Set tenant_id from path parameter
+	req.TenantID = tenantID
 
 	execution, err := h.workflowService.ExecuteWorkflow(c.Request.Context(), workflowID, &req)
 	if err != nil {

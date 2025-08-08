@@ -12,10 +12,10 @@ import (
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 
+	"github.com/flunq-io/api/internal/adapters"
 	"github.com/flunq-io/api/internal/handlers"
 	"github.com/flunq-io/api/internal/middleware"
 	"github.com/flunq-io/api/internal/models"
-	"github.com/flunq-io/api/internal/repository"
 	"github.com/flunq-io/api/internal/services"
 	"github.com/flunq-io/shared/pkg/eventstreaming"
 	"github.com/flunq-io/shared/pkg/interfaces"
@@ -108,7 +108,7 @@ func (w *WorkflowRepositoryAdapter) GetByID(ctx context.Context, id string) (*mo
 		Description: sharedWorkflow.Description,
 		TenantID:    sharedWorkflow.TenantID,
 		Definition:  sharedWorkflow.Definition,
-		Status:      models.WorkflowStatusPending,
+		State:       models.WorkflowStateActive,
 		Tags:        []string{},
 		CreatedAt:   sharedWorkflow.CreatedAt,
 		UpdatedAt:   sharedWorkflow.UpdatedAt,
@@ -164,7 +164,7 @@ func (w *WorkflowRepositoryAdapter) List(ctx context.Context, params *models.Wor
 			Description: sharedWorkflow.Description,
 			TenantID:    sharedWorkflow.TenantID,
 			Definition:  sharedWorkflow.Definition,
-			Status:      models.WorkflowStatusPending,
+			State:       models.WorkflowStateActive,
 			Tags:        []string{},
 			CreatedAt:   sharedWorkflow.CreatedAt,
 			UpdatedAt:   sharedWorkflow.UpdatedAt,
@@ -252,13 +252,14 @@ func main() {
 		TenantMode: true,
 	})
 
-	// Initialize repositories (keeping execution repo for now)
-	executionRepo := repository.NewMemoryExecutionRepository()
+	// Initialize execution repository using shared database
+	executionRepo := adapters.NewSharedExecutionRepository(database)
 
 	// Initialize services
-	workflowService := services.NewWorkflowService(database, executionRepo, eventStream, redisClient, logger)
-	// TODO: Update ExecutionService to use shared database interface
-	// For now, create a temporary adapter
+	// Cast to services.ExecutionRepository interface
+	var servicesExecutionRepo services.ExecutionRepository = executionRepo
+	workflowService := services.NewWorkflowService(database, servicesExecutionRepo, eventStream, redisClient, logger)
+	// Create workflow adapter for execution service
 	workflowAdapter := &WorkflowRepositoryAdapter{database: database}
 	executionService := services.NewExecutionService(executionRepo, workflowAdapter, eventStream, redisClient, logger)
 
@@ -322,8 +323,8 @@ func setupRouter(
 	router.GET("/health", healthHandler.Health)
 	router.GET("/metrics", healthHandler.Metrics)
 
-	// API v1 routes
-	v1 := router.Group("/api/v1")
+	// API v1 routes with tenant context
+	v1 := router.Group("/api/v1/:tenant_id")
 	{
 		// Workflow routes
 		workflows := v1.Group("/workflows")
@@ -346,12 +347,13 @@ func setupRouter(
 			executions.GET("/:id/events", executionHandler.GetEvents)
 			executions.POST("/:id/cancel", executionHandler.Cancel)
 		}
+	}
 
-		// Documentation routes
-		docs := v1.Group("/docs")
-		{
-			docs.GET("/openapi.yaml", docsHandler.OpenAPISpec)
-		}
+	// Documentation routes (outside tenant scope)
+	apiV1 := router.Group("/api/v1")
+	docs := apiV1.Group("/docs")
+	{
+		docs.GET("/openapi.yaml", docsHandler.OpenAPISpec)
 	}
 
 	// Swagger UI (outside of /api/v1)

@@ -3,9 +3,24 @@ info:
   title: Flunq.io Workflow API
   description: |
     REST API for the Flunq.io serverless workflow engine.
-    
+
     This API provides endpoints for managing workflows, executions, and monitoring workflow state.
     All workflows follow the Serverless Workflow Definition Language specification.
+
+    ## Multi-Tenant Architecture
+
+    The API supports multi-tenant operations where all resources are scoped to a specific tenant.
+    All endpoints require a `tenantId` path parameter to identify the tenant context.
+
+    ## Event-Driven Architecture
+
+    The system uses an event-driven architecture with Redis Streams for real-time event processing.
+    All workflow state changes are captured as events and can be retrieved through the events API.
+
+    ## Execution Model
+
+    Workflows are executed asynchronously. When you start a workflow execution, you receive an
+    execution ID that can be used to track progress and retrieve results.
   version: 1.0.0
   contact:
     name: Flunq.io API Support
@@ -21,13 +36,15 @@ servers:
     description: Production server
 
 paths:
-  /workflows:
+  /{tenantId}/workflows:
     post:
       summary: Create a new workflow
-      description: Creates a new workflow from a Serverless Workflow Definition Language specification
+      description: Creates a new workflow from a Serverless Workflow Definition Language specification for the specified tenant
       operationId: createWorkflow
       tags:
         - Workflows
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -35,25 +52,45 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateWorkflowRequest'
             examples:
-              user-onboarding:
-                summary: User onboarding workflow
+              simple-test-workflow:
+                summary: Simple test workflow
                 value:
-                  name: "user-onboarding"
-                  description: "Complete user onboarding process"
+                  name: "Simple Test Workflow"
+                  description: "A simple workflow for testing multi-tenant functionality"
                   definition:
-                    id: "user-onboarding"
+                    id: "simple-test"
                     version: "0.8"
                     specVersion: "0.8"
-                    name: "User Onboarding Workflow"
-                    start: "validate-user-data"
+                    name: "Simple Test Workflow"
+                    start: "initialize"
                     states:
-                      - name: "validate-user-data"
+                      - name: "initialize"
                         type: "operation"
                         actions:
-                          - name: "validate-email"
+                          - name: "init-action"
                             functionRef:
-                              refName: "validate-email"
-                        transition: "create-account"
+                              refName: "initialize"
+                        transition: "processData"
+                      - name: "processData"
+                        type: "operation"
+                        actions:
+                          - name: "process-action"
+                            functionRef:
+                              refName: "processData"
+                        transition: "waitStep"
+                      - name: "waitStep"
+                        type: "operation"
+                        actions:
+                          - name: "wait-action"
+                            functionRef:
+                              refName: "waitStep"
+                        transition: "finalize"
+                      - name: "finalize"
+                        type: "operation"
+                        actions:
+                          - name: "final-action"
+                            functionRef:
+                              refName: "finalize"
                         end: true
       responses:
         '201':
@@ -65,29 +102,31 @@ paths:
               examples:
                 created:
                   value:
-                    id: "wf_01234567890abcdef"
-                    name: "user-onboarding"
+                    id: "wf_72df93aa-4ca7-46"
+                    name: "Simple Test Workflow"
                     status: "created"
-                    created_at: "2024-01-01T12:00:00Z"
-                    updated_at: "2024-01-01T12:00:00Z"
+                    tenant_id: "acme-inc"
+                    created_at: "2025-08-08T11:00:00Z"
+                    updated_at: "2025-08-08T11:00:00Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
     get:
-      summary: List workflows
-      description: Retrieve a list of workflows with optional filtering
+      summary: List workflows for tenant
+      description: Retrieve a list of workflows for the specified tenant with optional filtering
       operationId: listWorkflows
       tags:
         - Workflows
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - name: status
           in: query
           description: Filter workflows by status
           schema:
             type: string
-            enum: [created, running, completed, failed, cancelled]
+            enum: [created, active, inactive]
         - name: limit
           in: query
           description: Maximum number of workflows to return
@@ -105,7 +144,7 @@ paths:
             default: 0
       responses:
         '200':
-          description: List of workflows
+          description: List of workflows for the tenant
           content:
             application/json:
               schema:
@@ -115,22 +154,16 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /workflows/{workflowId}:
+  /{tenantId}/workflows/{workflowId}:
     get:
       summary: Get workflow details
-      description: Retrieve detailed information about a specific workflow
+      description: Retrieve detailed information about a specific workflow for the specified tenant
       operationId: getWorkflow
       tags:
         - Workflows
       parameters:
-        - name: workflowId
-          in: path
-          required: true
-          description: Unique identifier of the workflow
-          schema:
-            type: string
-            pattern: '^wf_[a-zA-Z0-9]{16}$'
-          example: "wf_01234567890abcdef"
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/WorkflowId'
       responses:
         '200':
           description: Workflow details
@@ -138,6 +171,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkflowDetailResponse'
+              examples:
+                workflow_detail:
+                  value:
+                    id: "wf_72df93aa-4ca7-46"
+                    name: "Simple Test Workflow"
+                    description: "A simple workflow for testing multi-tenant functionality"
+                    status: "active"
+                    tenant_id: "acme-inc"
+                    created_at: "2025-08-08T11:00:00Z"
+                    updated_at: "2025-08-08T11:00:00Z"
+                    definition:
+                      id: "simple-test"
+                      version: "0.8"
+                      specVersion: "0.8"
+                      name: "Simple Test Workflow"
+                      start: "initialize"
+                      states:
+                        - name: "initialize"
+                          type: "operation"
+                        - name: "processData"
+                          type: "operation"
+                        - name: "waitStep"
+                          type: "operation"
+                        - name: "finalize"
+                          type: "operation"
+                    execution_count: 3
+                    last_execution: "2025-08-08T11:21:49Z"
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -145,18 +205,13 @@ paths:
 
     put:
       summary: Update workflow
-      description: Update an existing workflow definition
+      description: Update an existing workflow definition for the specified tenant
       operationId: updateWorkflow
       tags:
         - Workflows
       parameters:
-        - name: workflowId
-          in: path
-          required: true
-          description: Unique identifier of the workflow
-          schema:
-            type: string
-            pattern: '^wf_[a-zA-Z0-9]{16}$'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/WorkflowId'
       requestBody:
         required: true
         content:
@@ -179,18 +234,13 @@ paths:
 
     delete:
       summary: Delete workflow
-      description: Delete a workflow (only if not running)
+      description: Delete a workflow for the specified tenant (only if not running)
       operationId: deleteWorkflow
       tags:
         - Workflows
       parameters:
-        - name: workflowId
-          in: path
-          required: true
-          description: Unique identifier of the workflow
-          schema:
-            type: string
-            pattern: '^wf_[a-zA-Z0-9]{16}$'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/WorkflowId'
       responses:
         '204':
           description: Workflow deleted successfully
@@ -201,21 +251,16 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /workflows/{workflowId}/execute:
+  /{tenantId}/workflows/{workflowId}/execute:
     post:
       summary: Execute workflow
-      description: Start execution of a workflow with input data
+      description: Start execution of a workflow with input data for the specified tenant
       operationId: executeWorkflow
       tags:
         - Executions
       parameters:
-        - name: workflowId
-          in: path
-          required: true
-          description: Unique identifier of the workflow
-          schema:
-            type: string
-            pattern: '^wf_[a-zA-Z0-9]{16}$'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/WorkflowId'
       requestBody:
         required: true
         content:
@@ -223,14 +268,12 @@ paths:
             schema:
               $ref: '#/components/schemas/ExecuteWorkflowRequest'
             examples:
-              user-data:
-                summary: User onboarding execution
+              simple-test-execution:
+                summary: Simple test workflow execution
                 value:
                   input:
-                    user:
-                      email: "user@example.com"
-                      name: "John Doe"
-                      plan: "premium"
+                    message: "Hello from Multi-Tenant Postman!"
+                    user_id: "Bram Purnot"
                   correlation_id: "req_123456789"
       responses:
         '202':
@@ -239,6 +282,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExecutionResponse'
+              examples:
+                execution_started:
+                  value:
+                    id: "ex_d0747788-93b5-44"
+                    workflow_id: "wf_72df93aa-4ca7-46"
+                    status: "pending"
+                    tenant_id: "acme-inc"
+                    correlation_id: "req_123456789"
+                    started_at: "2025-08-08T11:13:29Z"
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -246,21 +298,22 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /workflows/{workflowId}/events:
+  /{tenantId}/workflows/{workflowId}/events:
     get:
       summary: Get workflow event history
-      description: Retrieve the complete event history for a workflow
+      description: Retrieve the complete event history for a workflow in the specified tenant
       operationId: getWorkflowEvents
       tags:
         - Events
       parameters:
-        - name: workflowId
-          in: path
-          required: true
-          description: Unique identifier of the workflow
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: execution_id
+          in: query
+          description: Filter events by execution ID
           schema:
             type: string
-            pattern: '^wf_[a-zA-Z0-9]{16}$'
+            pattern: '^ex_[a-zA-Z0-9-]+$'
         - name: since
           in: query
           description: Return events since this event ID
@@ -281,24 +334,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventHistoryResponse'
+              examples:
+                workflow_events:
+                  value:
+                    workflow_id: "wf_72df93aa-4ca7-46"
+                    events:
+                      - id: "336efaf6-c338-4475-8c4e-39d6bcff441e"
+                        source: "flunq.io/api"
+                        specversion: "1.0"
+                        type: "io.flunq.execution.started"
+                        time: "2025-08-08T11:13:29Z"
+                        workflowid: "wf_72df93aa-4ca7-46"
+                        executionid: "ex_d0747788-93b5-44"
+                        tenantid: "acme-inc"
+                        data:
+                          execution_id: "ex_d0747788-93b5-44"
+                          workflow_id: "wf_72df93aa-4ca7-46"
+                          input:
+                            message: "Hello from Multi-Tenant Postman!"
+                            user_id: "Bram Purnot"
+                      - id: "task-completed-task-initialize-1754652109741998000"
+                        source: "flunq.io/worker"
+                        specversion: "1.0"
+                        type: "io.flunq.task.completed"
+                        time: "2025-08-08T11:13:29Z"
+                        workflowid: "wf_72df93aa-4ca7-46"
+                        executionid: "ex_d0747788-93b5-44"
+                        tenantid: "acme-inc"
+                        data:
+                          task_name: "initialize"
+                          status: "completed"
+                    total: 10
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /executions:
+  /{tenantId}/executions:
     get:
-      summary: List executions
-      description: Retrieve a list of workflow executions
+      summary: List executions for tenant
+      description: Retrieve a list of workflow executions for the specified tenant
       operationId: listExecutions
       tags:
         - Executions
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - name: workflow_id
           in: query
           description: Filter executions by workflow ID
           schema:
             type: string
+            pattern: '^wf_[a-zA-Z0-9-]+$'
         - name: status
           in: query
           description: Filter executions by status
@@ -322,31 +408,45 @@ paths:
             default: 0
       responses:
         '200':
-          description: List of executions
+          description: List of executions for the tenant
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExecutionListResponse'
+              examples:
+                execution_list:
+                  value:
+                    items:
+                      - id: "ex_d0747788-93b5-44"
+                        workflow_id: "wf_72df93aa-4ca7-46"
+                        status: "completed"
+                        tenant_id: "acme-inc"
+                        started_at: "2025-08-08T11:13:29Z"
+                        completed_at: "2025-08-08T11:21:49Z"
+                      - id: "ex_1e148ecb-6a4f-49"
+                        workflow_id: "wf_72df93aa-4ca7-46"
+                        status: "completed"
+                        tenant_id: "acme-inc"
+                        started_at: "2025-08-08T09:47:33Z"
+                        completed_at: "2025-08-08T09:47:35Z"
+                    total: 2
+                    limit: 20
+                    offset: 0
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /executions/{executionId}:
+  /{tenantId}/executions/{executionId}:
     get:
       summary: Get execution details
-      description: Retrieve detailed information about a specific execution
+      description: Retrieve detailed information about a specific execution for the specified tenant
       operationId: getExecution
       tags:
         - Executions
       parameters:
-        - name: executionId
-          in: path
-          required: true
-          description: Unique identifier of the execution
-          schema:
-            type: string
-            pattern: '^ex_[a-zA-Z0-9]{16}$'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ExecutionId'
       responses:
         '200':
           description: Execution details
@@ -354,6 +454,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExecutionDetailResponse'
+              examples:
+                execution_detail:
+                  value:
+                    id: "ex_d0747788-93b5-44"
+                    workflow_id: "wf_72df93aa-4ca7-46"
+                    status: "completed"
+                    tenant_id: "acme-inc"
+                    started_at: "2025-08-08T11:13:29Z"
+                    completed_at: "2025-08-08T11:21:49Z"
+                    input:
+                      message: "Hello from Multi-Tenant Postman!"
+                      user_id: "Bram Purnot"
+                    output: {}
+                    duration_ms: 8193109
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -361,18 +475,13 @@ paths:
 
     post:
       summary: Cancel execution
-      description: Cancel a running workflow execution
+      description: Cancel a running workflow execution for the specified tenant
       operationId: cancelExecution
       tags:
         - Executions
       parameters:
-        - name: executionId
-          in: path
-          required: true
-          description: Unique identifier of the execution
-          schema:
-            type: string
-            pattern: '^ex_[a-zA-Z0-9]{16}$'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ExecutionId'
       requestBody:
         content:
           application/json:
@@ -397,6 +506,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /{tenantId}/executions/{executionId}/events:
+    get:
+      summary: Get execution event history
+      description: Retrieve the complete event history for a specific execution
+      operationId: getExecutionEvents
+      tags:
+        - Events
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ExecutionId'
+        - name: since
+          in: query
+          description: Return events since this event ID
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of events to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: Execution event history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventHistoryResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /health:
     get:
       summary: Health check
@@ -411,8 +555,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  value:
+                    status: "healthy"
+                    timestamp: "2025-08-08T11:30:00Z"
+                    version: "1.0.0"
+                    dependencies:
+                      redis: "healthy"
+                      event_store: "healthy"
 
 components:
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      description: Unique identifier of the tenant
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$'
+        minLength: 2
+        maxLength: 50
+      example: "acme-inc"
+
+    WorkflowId:
+      name: workflowId
+      in: path
+      required: true
+      description: Unique identifier of the workflow
+      schema:
+        type: string
+        pattern: '^wf_[a-zA-Z0-9-]+$'
+      example: "wf_72df93aa-4ca7-46"
+
+    ExecutionId:
+      name: executionId
+      in: path
+      required: true
+      description: Unique identifier of the execution
+      schema:
+        type: string
+        pattern: '^ex_[a-zA-Z0-9-]+$'
+      example: "ex_d0747788-93b5-44"
+
   schemas:
     CreateWorkflowRequest:
       type: object
@@ -460,22 +646,35 @@ components:
 
     WorkflowResponse:
       type: object
+      required:
+        - id
+        - name
+        - status
+        - tenant_id
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
           description: Unique identifier for the workflow
-          example: "wf_01234567890abcdef"
+          pattern: '^wf_[a-zA-Z0-9-]+$'
+          example: "wf_72df93aa-4ca7-46"
         name:
           type: string
           description: Human-readable name for the workflow
-          example: "user-onboarding"
+          example: "Simple Test Workflow"
         description:
           type: string
           description: Description of what the workflow does
+          example: "A simple workflow for testing multi-tenant functionality"
         status:
           type: string
           enum: [created, active, inactive]
           description: Current status of the workflow
+        tenant_id:
+          type: string
+          description: Tenant identifier that owns this workflow
+          example: "acme-inc"
         tags:
           type: array
           items:
@@ -538,21 +737,35 @@ components:
 
     ExecutionResponse:
       type: object
+      required:
+        - id
+        - workflow_id
+        - status
+        - tenant_id
+        - started_at
       properties:
         id:
           type: string
           description: Unique identifier for the execution
-          example: "ex_01234567890abcdef"
+          pattern: '^ex_[a-zA-Z0-9-]+$'
+          example: "ex_d0747788-93b5-44"
         workflow_id:
           type: string
           description: ID of the workflow being executed
+          pattern: '^wf_[a-zA-Z0-9-]+$'
+          example: "wf_72df93aa-4ca7-46"
         status:
           type: string
           enum: [pending, running, completed, failed, cancelled]
           description: Current status of the execution
+        tenant_id:
+          type: string
+          description: Tenant identifier that owns this execution
+          example: "acme-inc"
         correlation_id:
           type: string
           description: Correlation ID for tracking
+          example: "req_123456789"
         started_at:
           type: string
           format: date-time
@@ -596,7 +809,7 @@ components:
     ExecutionListResponse:
       type: object
       properties:
-        executions:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/ExecutionResponse'
@@ -651,9 +864,15 @@ components:
         workflowid:
           type: string
           description: Workflow ID (flunq.io extension)
+          example: "wf_72df93aa-4ca7-46"
         executionid:
           type: string
           description: Execution ID (flunq.io extension)
+          example: "ex_d0747788-93b5-44"
+        tenantid:
+          type: string
+          description: Tenant ID (flunq.io extension)
+          example: "acme-inc"
 
     EventHistoryResponse:
       type: object

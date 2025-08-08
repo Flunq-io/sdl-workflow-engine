@@ -1,7 +1,6 @@
 'use client'
 
 import { WorkflowEvent } from '@/lib/api'
-import { useLocale, useTranslations } from 'next-intl'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { 
@@ -16,13 +15,14 @@ import {
   FileText,
   Database
 } from 'lucide-react'
-import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
+import { formatRelativeTime, formatAbsoluteTime, formatDatePairCompact } from '@/lib/utils'
 import { useState } from 'react'
 
 interface EventTimelineProps {
   events: WorkflowEvent[]
   isLoading?: boolean
   error?: Error | null
+  locale?: string
 }
 
 function getEventIcon(eventType: string) {
@@ -216,7 +216,6 @@ interface DataDisplayProps {
 
 function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const t = useTranslations('eventTimeline')
 
   const getVariantStyles = () => {
     switch (variant) {
@@ -241,7 +240,7 @@ function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
   }
 
   const fieldCount = Object.keys(data).length
-  const fieldsText = fieldCount === 1 ? t('fields') : t('fields_plural')
+  const fieldsText = fieldCount === 1 ? 'field' : 'fields'
 
   return (
     <div className={`mt-2 border rounded-md ${getVariantStyles()}`}>
@@ -274,9 +273,7 @@ function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
   )
 }
 
-export function EventTimeline({ events, isLoading, error }: EventTimelineProps) {
-  const locale = useLocale()
-  const t = useTranslations('eventTimeline')
+export function EventTimeline({ events, isLoading, error, locale = 'en' }: EventTimelineProps) {
 
   if (error) {
     return (
@@ -284,14 +281,14 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Activity className="h-5 w-5" />
-            {t('title')}
+            Event Timeline
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">{t('failedToLoad')}</p>
+              <p className="text-muted-foreground">Failed to load events</p>
               <p className="text-sm text-muted-foreground">{error.message}</p>
             </div>
           </div>
@@ -305,7 +302,7 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           <Activity className="h-5 w-5" />
-          {t('title')}
+          Event Timeline
           {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
         </CardTitle>
       </CardHeader>
@@ -314,8 +311,8 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">{t('noEvents')}</p>
-              <p className="text-sm text-muted-foreground">{t('noEventsDescription')}</p>
+              <p className="text-muted-foreground">No events found</p>
+              <p className="text-sm text-muted-foreground">Events will appear here as the workflow executes</p>
             </div>
           </div>
         ) : (
@@ -380,16 +377,16 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                             <div className="flex items-center gap-2 text-xs">
                               <Clock className="h-3 w-3 text-yellow-600" />
                               <span className="font-medium">Started:</span>
-                              <span className="cursor-help" title={formatAbsoluteTime(requestedEvent.time, locale)}>
-                                {formatRelativeTime(requestedEvent.time, locale)}
+                              <span className="cursor-help">
+                                {formatDatePairCompact(requestedEvent.time, locale)}
                               </span>
                             </div>
                             {completedEvent && (
                               <div className="flex items-center gap-2 text-xs">
                                 <CheckCircle className="h-3 w-3 text-green-600" />
                                 <span className="font-medium">Completed:</span>
-                                <span className="cursor-help" title={formatAbsoluteTime(completedEvent.time, locale)}>
-                                  {formatRelativeTime(completedEvent.time, locale)}
+                                <span className="cursor-help">
+                                  {formatDatePairCompact(completedEvent.time, locale)}
                                 </span>
                               </div>
                             )}
@@ -404,14 +401,14 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                               <>
                                 {requestedInputData && (
                                   <DataDisplay
-                                    title={t('taskInput')}
+                                    title="Task Input"
                                     data={requestedInputData}
                                     variant="input"
                                   />
                                 )}
                                 {completedOutputData && (
                                   <DataDisplay
-                                    title={t('taskOutput')}
+                                    title="Task Output"
                                     data={completedOutputData}
                                     variant="output"
                                   />
@@ -461,10 +458,9 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
 
                         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                           <span
-                            title={formatAbsoluteTime(event.time, locale)}
                             className="cursor-help"
                           >
-                            {formatRelativeTime(event.time, locale)}
+                            {formatDatePairCompact(event.time, locale)}
                           </span>
                           {event.executionid && (
                             <span>Execution: {event.executionid.slice(0, 8)}...</span>
@@ -476,7 +472,7 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                     {/* Input/Output Data Display */}
                     {inputData && (
                       <DataDisplay
-                        title={event.type.includes('execution.started') ? t('workflowInput') : t('taskInput')}
+                        title={event.type.includes('execution.started') ? 'Workflow Input' : 'Task Input'}
                         data={inputData}
                         variant="input"
                       />
@@ -484,7 +480,7 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
 
                     {outputData && (
                       <DataDisplay
-                        title={event.type.includes('workflow.completed') ? t('workflowOutput') : t('taskOutput')}
+                        title={event.type.includes('workflow.completed') ? 'Workflow Output' : 'Task Output'}
                         data={outputData}
                         variant="output"
                       />
@@ -495,7 +491,7 @@ export function EventTimeline({ events, isLoading, error }: EventTimelineProps) 
                       <div className="mt-2">
                         <details className="group">
                           <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            {t('viewEventData')}
+                            View event data
                           </summary>
                           <div className="mt-2 p-3 bg-muted rounded-md">
                             <pre className="text-xs overflow-x-auto">

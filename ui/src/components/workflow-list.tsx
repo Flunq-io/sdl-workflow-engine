@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useTranslations, useLocale } from 'next-intl'
 import { Workflow } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +25,8 @@ import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
 
 interface WorkflowListProps {
   workflows: Workflow[]
+  tenant?: string
+  locale?: string
 }
 
 function extractTaskNames(definition: Record<string, any>): string[] {
@@ -39,74 +40,43 @@ function extractTaskNames(definition: Record<string, any>): string[] {
   }).filter(Boolean)
 }
 
-function getTaskSummary(taskNames: string[], status: Workflow['status']): string {
+function getTaskSummary(taskNames: string[]): string {
   if (taskNames.length === 0) return 'No tasks defined'
-
-  if (status === 'completed') {
-    return `Completed ${taskNames.length} tasks: ${taskNames.slice(0, 3).join(', ')}${taskNames.length > 3 ? '...' : ''}`
-  }
-
-  if (status === 'running') {
-    return `Running tasks: ${taskNames.slice(0, 3).join(' → ')}${taskNames.length > 3 ? '...' : ''}`
-  }
-
   return `${taskNames.length} tasks: ${taskNames.slice(0, 3).join(', ')}${taskNames.length > 3 ? '...' : ''}`
 }
 
-function getStatusIcon(status: Workflow['status']) {
-  switch (status) {
-    case 'pending':
-      return <Timer className="h-4 w-4" />
-    case 'running':
-      return <Play className="h-4 w-4" />
-    case 'waiting':
-      return <Clock className="h-4 w-4" />
-    case 'suspended':
-      return <Pause className="h-4 w-4" />
-    case 'cancelled':
-      return <Square className="h-4 w-4" />
-    case 'faulted':
-      return <AlertCircle className="h-4 w-4" />
-    case 'completed':
+function getStateIcon(state: Workflow['state']) {
+  switch (state) {
+    case 'active':
       return <CheckCircle className="h-4 w-4" />
+    case 'inactive':
+      return <Pause className="h-4 w-4" />
     default:
-      return <Timer className="h-4 w-4" />
+      return <CheckCircle className="h-4 w-4" />
   }
 }
 
-function getStatusVariant(status: Workflow['status']) {
-  switch (status) {
-    case 'pending':
-      return 'pending' as const
-    case 'running':
-      return 'running' as const
-    case 'waiting':
-      return 'waiting' as const
-    case 'suspended':
-      return 'suspended' as const
-    case 'cancelled':
-      return 'cancelled' as const
-    case 'faulted':
-      return 'faulted' as const
-    case 'completed':
-      return 'completed' as const
+function getStateVariant(state: Workflow['state']) {
+  switch (state) {
+    case 'active':
+      return 'default' as const
+    case 'inactive':
+      return 'secondary' as const
     default:
       return 'default' as const
   }
 }
 
-export function WorkflowList({ workflows }: WorkflowListProps) {
-  const [filter, setFilter] = useState<'all' | Workflow['status']>('all')
+export function WorkflowList({ workflows, tenant = 'acme-inc', locale = 'en' }: WorkflowListProps) {
+  const [filter, setFilter] = useState<'all' | Workflow['state']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
-  const t = useTranslations()
-  const locale = useLocale()
 
   const filteredWorkflows = workflows.filter(workflow =>
-    filter === 'all' || workflow.status === filter
+    filter === 'all' || workflow.state === filter
   )
 
-  const statusCounts = workflows.reduce((acc, workflow) => {
-    acc[workflow.status] = (acc[workflow.status] || 0) + 1
+  const stateCounts = workflows.reduce((acc, workflow) => {
+    acc[workflow.state] = (acc[workflow.state] || 0) + 1
     return acc
   }, {} as Record<string, number>)
 
@@ -114,7 +84,7 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
     <div className="space-y-6">
       {/* Header with Filters and View Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        {/* Status Filter */}
+        {/* State Filter */}
         <div className="flex flex-wrap gap-2">
           <Button
             variant={filter === 'all' ? 'default' : 'outline'}
@@ -123,19 +93,19 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
           >
             All ({workflows.length})
           </Button>
-          {(['pending', 'running', 'waiting', 'suspended', 'cancelled', 'faulted', 'completed'] as const).map(status => {
-            const count = statusCounts[status] || 0
+          {(['active', 'inactive'] as const).map(state => {
+            const count = stateCounts[state] || 0
             if (count === 0) return null
 
             return (
               <Button
-                key={status}
-                variant={filter === status ? 'default' : 'outline'}
+                key={state}
+                variant={filter === state ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setFilter(status)}
+                onClick={() => setFilter(state)}
                 className="capitalize"
               >
-                {status} ({count})
+                {state} ({count})
               </Button>
             )
           })}
@@ -149,7 +119,7 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
             onClick={() => setViewMode('cards')}
           >
             <LayoutGrid className="h-4 w-4 mr-1" />
-            {t('common.cards')}
+            Cards
           </Button>
           <Button
             variant={viewMode === 'table' ? 'default' : 'outline'}
@@ -157,7 +127,7 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
             onClick={() => setViewMode('table')}
           >
             <Table className="h-4 w-4 mr-1" />
-            {t('common.table')}
+            Table
           </Button>
         </div>
       </div>
@@ -165,11 +135,11 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
       {/* Workflow Content */}
       {filteredWorkflows.length === 0 ? (
         <div className="text-center py-12">
-          <h3 className="text-lg font-semibold text-foreground mb-2">{t('workflows.noWorkflows')}</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-2">No workflows found</h3>
           <p className="text-muted-foreground">
             {filter === 'all'
-              ? t('workflows.noWorkflowsDescription')
-              : t('workflows.noWorkflowsFiltered', { status: filter })
+              ? 'Create your first workflow to get started'
+              : `No workflows found with status: ${filter}`
             }
           </p>
         </div>
@@ -178,7 +148,7 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredWorkflows.map((workflow) => {
             const taskNames = extractTaskNames(workflow.definition)
-            const taskSummary = getTaskSummary(taskNames, workflow.status)
+            const taskSummary = getTaskSummary(taskNames)
 
             return (
               <Card key={workflow.id} className="hover:shadow-md transition-shadow">
@@ -190,9 +160,9 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
                         {workflow.description || 'No description'}
                       </p>
                     </div>
-                    <Badge variant={getStatusVariant(workflow.status)} className="flex items-center gap-1">
-                      {getStatusIcon(workflow.status)}
-                      {workflow.status}
+                    <Badge variant={getStateVariant(workflow.state)} className="flex items-center gap-1">
+                      {getStateIcon(workflow.state)}
+                      {workflow.state}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -247,9 +217,9 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
                 
                 <div className="flex gap-2 pt-2">
                   <Button asChild size="sm" variant={'outline'} className="flex-1 text-blue-500">
-                    <Link href={`/${locale}/workflows/${workflow.id}`}>
+                    <Link href={`/${tenant}/${locale}/workflows/${workflow.id}`}>
                       <Eye className="h-4 w-4 mr-1" />
-                      {t('common.view')}
+                      View
                     </Link>
                   </Button>
                 </div>
@@ -264,12 +234,12 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
           <table className="w-full">
             <thead className="bg-muted/50">
               <tr>
-                <th className="text-left p-4 font-medium">{t('common.name')}</th>
-                <th className="text-left p-4 font-medium">{t('common.status')}</th>
-                <th className="text-left p-4 font-medium">{t('common.tasks')}</th>
-                <th className="text-left p-4 font-medium">{t('common.created')}</th>
-                <th className="text-left p-4 font-medium">{t('common.executions')}</th>
-                <th className="text-left p-4 font-medium">{t('common.actions')}</th>
+                <th className="text-left p-4 font-medium">Name</th>
+                <th className="text-left p-4 font-medium">Status</th>
+                <th className="text-left p-4 font-medium">Tasks</th>
+                <th className="text-left p-4 font-medium">Created</th>
+                <th className="text-left p-4 font-medium">Executions</th>
+                <th className="text-left p-4 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -287,9 +257,9 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Badge variant={getStatusVariant(workflow.status)} className="flex items-center gap-1 w-fit">
-                        {getStatusIcon(workflow.status)}
-                        {workflow.status}
+                      <Badge variant={getStateVariant(workflow.state)} className="flex items-center gap-1 w-fit">
+                        {getStateIcon(workflow.state)}
+                        {workflow.state}
                       </Badge>
                     </td>
                     <td className="p-4">
@@ -323,9 +293,9 @@ export function WorkflowList({ workflows }: WorkflowListProps) {
                     </td>
                     <td className="p-4">
                       <Button asChild size="sm" variant="outline">
-                        <Link href={`/${locale}/workflows/${workflow.id}`}>
+                        <Link href={`/${tenant}/${locale}/workflows/${workflow.id}`}>
                           <Eye className="h-4 w-4 mr-1" />
-                          {t('common.view')}
+                          View
                         </Link>
                       </Button>
                     </td>

@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/flunq-io/shared/pkg/eventstreaming"
+	"github.com/flunq-io/shared/pkg/interfaces"
+	"github.com/flunq-io/shared/pkg/storage"
 	"github.com/flunq-io/worker/internal/adapters"
 	"github.com/flunq-io/worker/internal/engine"
 	"github.com/flunq-io/worker/internal/processor"
@@ -20,6 +22,48 @@ import (
 // LoggerAdapter adapts zap.Logger to the shared eventstreaming.Logger interface
 type LoggerAdapter struct {
 	logger *zap.Logger
+}
+
+// DatabaseLoggerAdapter adapts zap.Logger to the shared database Logger interface
+type DatabaseLoggerAdapter struct {
+	logger *zap.Logger
+}
+
+// DatabaseLoggerAdapter methods
+func (l *DatabaseLoggerAdapter) Debug(msg string, fields ...interface{}) {
+	l.logger.Debug(msg, l.convertFields(fields...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Info(msg string, fields ...interface{}) {
+	l.logger.Info(msg, l.convertFields(fields...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Warn(msg string, fields ...interface{}) {
+	l.logger.Warn(msg, l.convertFields(fields...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Error(msg string, fields ...interface{}) {
+	l.logger.Error(msg, l.convertFields(fields...)...)
+}
+
+func (l *DatabaseLoggerAdapter) Fatal(msg string, fields ...interface{}) {
+	l.logger.Fatal(msg, l.convertFields(fields...)...)
+}
+
+func (l *DatabaseLoggerAdapter) With(fields ...interface{}) interfaces.Logger {
+	return &DatabaseLoggerAdapter{
+		logger: l.logger.With(l.convertFields(fields...)...),
+	}
+}
+
+func (l *DatabaseLoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
+	zapFields := make([]zap.Field, 0, len(fields)/2)
+	for i := 0; i < len(fields)-1; i += 2 {
+		if key, ok := fields[i].(string); ok {
+			zapFields = append(zapFields, zap.Any(key, fields[i+1]))
+		}
+	}
+	return zapFields
 }
 
 func (l *LoggerAdapter) Debug(msg string, fields ...interface{}) {
@@ -75,8 +119,17 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", "error", err)
 	}
 
-	// Initialize database adapter
-	database := adapters.NewRedisDatabase(redisClient, zapLogger)
+	// Initialize shared database with tenant support
+	databaseLogger := &DatabaseLoggerAdapter{logger: logger}
+	sharedDatabase := storage.NewRedisDatabase(redisClient, databaseLogger, &interfaces.DatabaseConfig{
+		Type:       "redis",
+		Host:       getEnv("REDIS_HOST", "localhost"),
+		Port:       6379,
+		TenantMode: true, // Enable tenant mode for multi-tenant support
+	})
+
+	// Create adapter to bridge shared database to worker's interface
+	database := adapters.NewSharedDatabaseAdapter(sharedDatabase, zapLogger)
 
 	// Initialize protobuf serializer
 	serializer := serializer.NewProtobufSerializer()
@@ -84,17 +137,18 @@ func main() {
 	// Initialize metrics (placeholder)
 	metrics := &adapters.NoOpMetrics{}
 
-	// Initialize Serverless Workflow engine
-	workflowEngine := engine.NewServerlessWorkflowEngine(zapLogger)
-
 	// Initialize shared event stream for both subscribing and publishing (tenant-isolated streams)
 	loggerAdapter := &LoggerAdapter{logger: logger}
 	eventStream := eventstreaming.NewRedisEventStream(redisClient, loggerAdapter)
 
-	// Initialize workflow processor with only shared event stream
+	// Initialize Serverless Workflow engine with event stream for wait tasks
+	workflowEngine := engine.NewServerlessWorkflowEngine(zapLogger, eventStream)
+
+	// Initialize workflow processor with shared event stream and database
 	workflowProcessor := processor.NewWorkflowProcessor(
 		eventStream,
 		database,
+		sharedDatabase, // Pass shared database for execution updates
 		workflowEngine,
 		serializer,
 		zapLogger,

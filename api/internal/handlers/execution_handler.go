@@ -24,8 +24,19 @@ func NewExecutionHandler(executionService *services.ExecutionService, logger *za
 	}
 }
 
-// List handles GET /api/v1/executions
+// List handles GET /api/v1/:tenant_id/executions
 func (h *ExecutionHandler) List(c *gin.Context) {
+	// Extract tenant_id from path parameter
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		h.logger.Error("Missing tenant_id in path")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"Missing tenant_id in path",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
 	var params models.ExecutionListParams
 	if err := c.ShouldBindQuery(&params); err != nil {
 		h.logger.Error("Failed to bind execution list parameters", zap.Error(err))
@@ -37,6 +48,9 @@ func (h *ExecutionHandler) List(c *gin.Context) {
 		}).WithRequestID(getRequestID(c)))
 		return
 	}
+
+	// Set tenant_id from path parameter
+	params.TenantID = tenantID
 
 	// Set defaults
 	if params.Limit == 0 {
@@ -60,17 +74,27 @@ func (h *ExecutionHandler) List(c *gin.Context) {
 	}
 
 	response := models.ExecutionListResponse{
-		Executions: executionResponses,
-		Total:      total,
-		Limit:      params.Limit,
-		Offset:     params.Offset,
+		Items:  executionResponses,
+		Total:  total,
+		Limit:  params.Limit,
+		Offset: params.Offset,
 	}
 
 	c.JSON(http.StatusOK, response)
 }
 
-// Get handles GET /api/v1/executions/:id
+// Get handles GET /api/v1/:tenant_id/executions/:id
 func (h *ExecutionHandler) Get(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		h.logger.Error("Missing tenant_id in path")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"Missing tenant_id in path",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
 	executionID := c.Param("id")
 	if executionID == "" {
 		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
@@ -80,7 +104,7 @@ func (h *ExecutionHandler) Get(c *gin.Context) {
 		return
 	}
 
-	execution, err := h.executionService.GetExecution(c.Request.Context(), executionID)
+	execution, err := h.executionService.GetExecutionByTenant(c.Request.Context(), executionID, tenantID)
 	if err != nil {
 		h.logger.Error("Failed to get execution",
 			zap.String("execution_id", executionID),
@@ -157,8 +181,18 @@ func (h *ExecutionHandler) Cancel(c *gin.Context) {
 	c.JSON(http.StatusOK, execution.ToResponse())
 }
 
-// GetEvents handles GET /api/v1/executions/:id/events
+// GetEvents handles GET /api/v1/:tenant_id/executions/:id/events
 func (h *ExecutionHandler) GetEvents(c *gin.Context) {
+	tenantID := c.Param("tenant_id")
+	if tenantID == "" {
+		h.logger.Error("Missing tenant_id in path")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"Missing tenant_id in path",
+		).WithRequestID(getRequestID(c)))
+		return
+	}
+
 	executionID := c.Param("id")
 	if executionID == "" {
 		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
@@ -184,6 +218,29 @@ func (h *ExecutionHandler) GetEvents(c *gin.Context) {
 	// Set defaults
 	if params.Limit == 0 {
 		params.Limit = 100
+	}
+
+	// First verify tenant access to the execution
+	_, err := h.executionService.GetExecutionByTenant(c.Request.Context(), executionID, tenantID)
+	if err != nil {
+		h.logger.Error("Failed to verify execution access",
+			zap.String("execution_id", executionID),
+			zap.String("tenant_id", tenantID),
+			zap.Error(err))
+
+		if err == services.ErrExecutionNotFound {
+			c.JSON(http.StatusNotFound, models.NewErrorResponse(
+				models.ErrorCodeExecutionNotFound,
+				models.MessageExecutionNotFound,
+			).WithRequestID(getRequestID(c)))
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+			models.ErrorCodeInternalError,
+			models.MessageInternalError,
+		).WithRequestID(getRequestID(c)))
+		return
 	}
 
 	events, err := h.executionService.GetExecutionEvents(c.Request.Context(), executionID, &params)

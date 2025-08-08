@@ -180,6 +180,11 @@ func (r *MemoryExecutionRepository) List(ctx context.Context, params *models.Exe
 
 	var executions []models.Execution
 	for _, execution := range r.executions {
+		// Apply tenant ID filter if specified
+		if params.TenantID != "" && execution.TenantID != params.TenantID {
+			continue
+		}
+
 		// Apply workflow ID filter if specified
 		if params.WorkflowID != "" && execution.WorkflowID != params.WorkflowID {
 			continue

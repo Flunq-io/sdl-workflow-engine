@@ -79,7 +79,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 		Description: req.Description,
 		TenantID:    req.TenantID,
 		Definition:  req.Definition,
-		Status:      models.WorkflowStatusPending,
+		State:       models.WorkflowStateActive,
 		Tags:        req.Tags,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -123,7 +123,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 	event.SetData(map[string]interface{}{
 		"name":                   workflow.Name,
 		"description":            workflow.Description,
-		"status":                 workflow.Status,
+		"state":                  workflow.State,
 		"tenant_id":              workflow.TenantID,
 		"workflow_definition_id": workflowDefinitionID, // Just the definition ID for stream routing
 		"definition":             workflow.Definition,  // Include the workflow definition
@@ -212,7 +212,7 @@ func (s *WorkflowService) UpdateWorkflow(ctx context.Context, workflowID string,
 	event.SetData(map[string]interface{}{
 		"name":        workflow.Name,
 		"description": workflow.Description,
-		"status":      workflow.Status,
+		"state":       workflow.State,
 		"updated_by":  "api", // TODO: Get from authentication context
 	})
 
@@ -292,24 +292,40 @@ func (s *WorkflowService) ListWorkflows(ctx context.Context, params *models.Work
 
 // ExecuteWorkflow starts execution of a workflow
 func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string, req *models.ExecuteWorkflowRequest) (*models.Execution, error) {
-	// Get workflow
-	workflow, err := s.workflowAdapter.GetByID(ctx, workflowID)
+	s.logger.Info("Starting workflow execution",
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", req.TenantID))
+
+	// Get workflow using tenant-aware lookup
+	workflow, err := s.workflowAdapter.GetByIDWithTenant(ctx, req.TenantID, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
+			s.logger.Error("Workflow not found",
+				zap.String("workflow_id", workflowID),
+				zap.String("tenant_id", req.TenantID))
 			return nil, ErrWorkflowNotFound
 		}
+		s.logger.Error("Failed to get workflow",
+			zap.String("workflow_id", workflowID),
+			zap.String("tenant_id", req.TenantID),
+			zap.Error(err))
 		return nil, fmt.Errorf("failed to get workflow: %w", err)
 	}
 
+	s.logger.Info("Found workflow for execution",
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", req.TenantID),
+		zap.String("workflow_name", workflow.Name))
+
 	// Check if workflow can be executed
-	if workflow.Status == models.WorkflowStatusCancelled || workflow.Status == models.WorkflowStatusFaulted {
-		return nil, fmt.Errorf("workflow cannot be executed in %s status", workflow.Status)
+	if workflow.State == models.WorkflowStateInactive {
+		return nil, fmt.Errorf("workflow cannot be executed in %s state", workflow.State)
 	}
 
 	// Generate execution ID
 	executionID := generateExecutionID()
 
-	// Create execution
+	// Create execution with tenant context from request
 	execution := &models.Execution{
 		ID:            executionID,
 		WorkflowID:    workflowID,
@@ -317,13 +333,28 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 		CorrelationID: req.CorrelationID,
 		Input:         req.Input,
 		StartedAt:     time.Now(),
+		TenantID:      req.TenantID, // Use tenant ID from request
 	}
+
+	s.logger.Info("Creating execution",
+		zap.String("execution_id", executionID),
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", execution.TenantID))
 
 	// Save execution to repository
 	if err := s.executionRepo.Create(ctx, execution); err != nil {
-		s.logger.Error("Failed to create execution in repository", zap.Error(err))
+		s.logger.Error("Failed to create execution in repository",
+			zap.String("execution_id", executionID),
+			zap.String("workflow_id", workflowID),
+			zap.String("tenant_id", execution.TenantID),
+			zap.Error(err))
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
+
+	s.logger.Info("Execution created successfully",
+		zap.String("execution_id", executionID),
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", execution.TenantID))
 
 	// Publish workflow execution started event
 	event := cloudevents.NewCloudEvent(
@@ -334,7 +365,7 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 	event.WorkflowID = workflowID
 	event.ExecutionID = executionID
 	event.Time = time.Now()
-	event.TenantID = workflow.TenantID
+	event.TenantID = req.TenantID
 	// Extract workflow definition ID for stream routing
 	workflowDefinitionID := "default"
 	if workflow.Definition != nil {
@@ -354,12 +385,12 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 		"workflow_definition_id": workflowDefinitionID, // Just the definition ID for stream routing
 		"correlation_id":         execution.CorrelationID,
 		"input":                  execution.Input,
-		"tenant_id":              workflow.TenantID,
+		"tenant_id":              req.TenantID,
 		"started_by":             "api", // TODO: Get from authentication context
 	})
 
 	// Add tenant, workflow, and execution metadata to event (using proper CloudEvent fields)
-	event.TenantID = workflow.TenantID
+	event.TenantID = req.TenantID
 	event.WorkflowID = workflow.ID
 	event.ExecutionID = executionID
 
@@ -412,13 +443,15 @@ func (s *WorkflowService) GetWorkflowEvents(ctx context.Context, workflowID stri
 	return apiEvents, nil
 }
 
-// GetWorkflowExecutions retrieves all executions for a specific workflow from workflow state storage
+// GetWorkflowExecutions retrieves all executions for a specific workflow
+// NOTE: This now uses the execution repository (backed by memory for now) instead of reading a single workflow state key.
+// Next step is to switch to the shared Database interface for tenant-aware, persistent storage (e.g., Postgres).
 func (s *WorkflowService) GetWorkflowExecutions(ctx context.Context, workflowID string, params *models.ExecutionListParams) ([]models.Execution, int, error) {
-	s.logger.Debug("Getting workflow executions from state storage",
+	s.logger.Debug("Getting workflow executions",
 		zap.String("workflow_id", workflowID))
 
-	// Check if workflow exists
-	_, err := s.workflowAdapter.GetByID(ctx, workflowID)
+	// Ensure workflow exists (and get tenant for future filtering)
+	wf, err := s.workflowAdapter.GetByID(ctx, workflowID)
 	if err != nil {
 		if isNotFoundError(err) {
 			return nil, 0, ErrWorkflowNotFound
@@ -429,20 +462,23 @@ func (s *WorkflowService) GetWorkflowExecutions(ctx context.Context, workflowID 
 		return nil, 0, fmt.Errorf("failed to get workflow: %w", err)
 	}
 
-	// Read workflow state from Redis (Worker service stores state here)
-	executions, err := s.getExecutionsFromWorkflowState(ctx, workflowID)
+	// Use the execution repository for now (returns many executions)
+	if params == nil {
+		params = &models.ExecutionListParams{}
+	}
+	params.WorkflowID = workflowID
+
+	executions, total, err := s.executionRepo.List(ctx, params)
 	if err != nil {
-		s.logger.Error("Failed to get executions from workflow state",
+		s.logger.Error("Failed to list executions from repository",
 			zap.String("workflow_id", workflowID),
 			zap.Error(err))
-		return nil, 0, fmt.Errorf("failed to get executions from state: %w", err)
+		return nil, 0, fmt.Errorf("failed to list executions: %w", err)
 	}
 
-	// Filter executions if needed (for now, we only have one execution per workflow)
-	total := len(executions)
-
-	s.logger.Info("Retrieved workflow executions from state storage",
+	s.logger.Info("Retrieved workflow executions",
 		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", wf.Workflow.TenantID),
 		zap.Int("total_executions", total))
 
 	return executions, total, nil

@@ -27,7 +27,18 @@ func (a *WorkflowAdapter) Create(ctx context.Context, workflow *models.Workflow)
 
 // GetByID retrieves a workflow by ID and converts to API model
 func (a *WorkflowAdapter) GetByID(ctx context.Context, id string) (*models.WorkflowDetail, error) {
+	// For backward compatibility, use the non-tenant method
 	sharedWorkflow, err := a.database.GetWorkflowDefinition(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return a.toAPIWorkflowDetail(sharedWorkflow), nil
+}
+
+// GetByIDWithTenant retrieves a workflow by ID with tenant context and converts to API model
+func (a *WorkflowAdapter) GetByIDWithTenant(ctx context.Context, tenantID, id string) (*models.WorkflowDetail, error) {
+	sharedWorkflow, err := a.database.GetWorkflowDefinitionWithTenant(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +100,8 @@ func (a *WorkflowAdapter) toAPIWorkflow(sharedWorkflow *interfaces.WorkflowDefin
 		Description: sharedWorkflow.Description,
 		TenantID:    sharedWorkflow.TenantID,
 		Definition:  sharedWorkflow.Definition,
-		Status:      models.WorkflowStatusPending, // Default status
-		Tags:        []string{},                   // TODO: Add tags support to shared interface
+		State:       models.WorkflowStateActive, // Default state
+		Tags:        []string{},                 // TODO: Add tags support to shared interface
 		CreatedAt:   sharedWorkflow.CreatedAt,
 		UpdatedAt:   sharedWorkflow.UpdatedAt,
 	}

@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useTranslations, useLocale } from 'next-intl'
 import { Execution } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -17,16 +16,16 @@ import {
   CheckCircle,
   Timer,
   Eye,
-  Zap,
-  ArrowRight,
   LayoutGrid,
   Table,
   Workflow
 } from 'lucide-react'
-import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
+import { formatDurationHMS, formatDatePairUltraCompact } from '@/lib/utils'
 
 interface ExecutionListProps {
   executions: (Execution & { workflow_name?: string })[]
+  tenant?: string
+  locale?: string
 }
 
 function getStatusIcon(status: Execution['status']) {
@@ -87,11 +86,9 @@ function formatDuration(durationMs?: number): string {
   }
 }
 
-export function ExecutionList({ executions }: ExecutionListProps) {
+export function ExecutionList({ executions, tenant = 'acme-inc', locale = 'en' }: ExecutionListProps) {
   const [filter, setFilter] = useState<'all' | Execution['status']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
-  const t = useTranslations()
-  const locale = useLocale()
 
   const filteredExecutions = executions.filter(execution =>
     filter === 'all' || execution.status === filter
@@ -141,7 +138,7 @@ export function ExecutionList({ executions }: ExecutionListProps) {
             onClick={() => setViewMode('cards')}
           >
             <LayoutGrid className="h-4 w-4 mr-1" />
-            {t('common.cards')}
+            Cards
           </Button>
           <Button
             variant={viewMode === 'table' ? 'default' : 'outline'}
@@ -149,7 +146,7 @@ export function ExecutionList({ executions }: ExecutionListProps) {
             onClick={() => setViewMode('table')}
           >
             <Table className="h-4 w-4 mr-1" />
-            {t('common.table')}
+            Table
           </Button>
         </div>
       </div>
@@ -157,11 +154,11 @@ export function ExecutionList({ executions }: ExecutionListProps) {
       {/* Execution Content */}
       {filteredExecutions.length === 0 ? (
         <div className="text-center py-12">
-          <h3 className="text-lg font-semibold text-foreground mb-2">{t('executions.noExecutions')}</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-2">No executions found</h3>
           <p className="text-muted-foreground">
             {filter === 'all'
-              ? t('executions.noExecutionsDescription')
-              : t('executions.noExecutionsFiltered', { status: filter })
+              ? 'Execute a workflow to see executions here'
+              : `No executions found with status: ${filter}`
             }
           </p>
         </div>
@@ -195,18 +192,23 @@ export function ExecutionList({ executions }: ExecutionListProps) {
                 </div>
 
                 {/* Timing Info */}
-                <div className="flex items-center justify-between text-sm">
+                <div className="space-y-1 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Calendar className="h-4 w-4" />
-                    <span
-                      title={formatAbsoluteTime(execution.started_at, locale)}
-                      className="cursor-help"
-                    >
-                      Started {formatRelativeTime(execution.started_at, locale)}
+                    <span className="text-muted-foreground">
+                      Started {formatDatePairUltraCompact(execution.started_at, locale)}
                     </span>
                   </div>
+                  {execution.completed_at && (
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <Clock className="h-4 w-4" />
+                      <span className="text-muted-foreground" title={new Date(execution.completed_at).toISOString()}>
+                        Completed {formatDatePairUltraCompact(execution.completed_at, locale)}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                
+
                 {execution.duration_ms && (
                   <div className="text-sm text-muted-foreground">
                     Duration: {formatDuration(execution.duration_ms)}
@@ -222,9 +224,9 @@ export function ExecutionList({ executions }: ExecutionListProps) {
                 
                 <div className="flex gap-2 pt-2">
                   <Button asChild size="sm" variant={'outline'} className="flex-1 text-blue-500">
-                    <Link href={`/${locale}/executions/${execution.id}`}>
+                    <Link href={`/${tenant}/${locale}/executions/${execution.id}`}>
                       <Eye className="h-4 w-4 mr-1" />
-                      {t('common.view')}
+                      View
                     </Link>
                   </Button>
                 </div>
@@ -238,12 +240,13 @@ export function ExecutionList({ executions }: ExecutionListProps) {
           <table className="w-full">
             <thead className="bg-muted/50">
               <tr>
-                <th className="text-left p-4 font-medium">{t('common.execution')}</th>
-                <th className="text-left p-4 font-medium">{t('common.workflow')}</th>
-                <th className="text-left p-4 font-medium">{t('common.status')}</th>
-                <th className="text-left p-4 font-medium">{t('common.started')}</th>
-                <th className="text-left p-4 font-medium">{t('common.duration')}</th>
-                <th className="text-left p-4 font-medium">{t('common.actions')}</th>
+                <th className="text-left p-4 font-medium">Execution</th>
+                <th className="text-left p-4 font-medium">Workflow</th>
+                <th className="text-left p-4 font-medium">Status</th>
+                <th className="text-left p-4 font-medium">Started</th>
+                <th className="text-left p-4 font-medium">Completed</th>
+                <th className="text-left p-4 font-medium">Duration</th>
+                <th className="text-left p-4 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -274,17 +277,26 @@ export function ExecutionList({ executions }: ExecutionListProps) {
                     </Badge>
                   </td>
                   <td className="p-4">
-                    <span
-                      title={formatAbsoluteTime(execution.started_at, locale)}
-                      className="cursor-help text-sm"
-                    >
-                      {formatRelativeTime(execution.started_at, locale)}
+                    <span className="text-sm">
+                      {formatDatePairUltraCompact(execution.started_at, locale)}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <span className="text-sm">
+                      {execution.completed_at ? (
+                        <>{formatDatePairUltraCompact(execution.completed_at, locale)}</>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </span>
                   </td>
                   <td className="p-4">
                     <div className="text-sm">
                       {execution.duration_ms ? (
-                        formatDuration(execution.duration_ms)
+                        <>
+                          {formatDuration(execution.duration_ms)}
+                          <span className="text-muted-foreground"> ({formatDurationHMS(execution.duration_ms)})</span>
+                        </>
                       ) : execution.status === 'running' ? (
                         <span className="text-muted-foreground">Running...</span>
                       ) : (
@@ -294,9 +306,9 @@ export function ExecutionList({ executions }: ExecutionListProps) {
                   </td>
                   <td className="p-4">
                     <Button asChild size="sm" variant="outline">
-                      <Link href={`/${locale}/executions/${execution.id}`}>
+                      <Link href={`/${tenant}/${locale}/executions/${execution.id}`}>
                         <Eye className="h-4 w-4 mr-1" />
-                        {t('common.view')}
+                        View
                       </Link>
                     </Button>
                   </td>

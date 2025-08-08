@@ -5,17 +5,12 @@ import (
 	"time"
 )
 
-// WorkflowStatus represents the status of a workflow (SDL compliant)
-type WorkflowStatus string
+// WorkflowState represents the state of a workflow definition
+type WorkflowState string
 
 const (
-	WorkflowStatusPending   WorkflowStatus = "pending"   // The workflow has been initiated and is pending execution
-	WorkflowStatusRunning   WorkflowStatus = "running"   // The workflow is currently in progress
-	WorkflowStatusWaiting   WorkflowStatus = "waiting"   // The workflow execution is temporarily paused, awaiting events or time
-	WorkflowStatusSuspended WorkflowStatus = "suspended" // The workflow execution has been manually paused by a user
-	WorkflowStatusCancelled WorkflowStatus = "cancelled" // The workflow execution has been terminated before completion
-	WorkflowStatusFaulted   WorkflowStatus = "faulted"   // The workflow execution has encountered an error
-	WorkflowStatusCompleted WorkflowStatus = "completed" // The workflow ran to completion
+	WorkflowStateActive   WorkflowState = "active"   // The workflow is active and can be executed
+	WorkflowStateInactive WorkflowState = "inactive" // The workflow is inactive and cannot be executed
 )
 
 // Workflow represents a workflow definition
@@ -25,7 +20,7 @@ type Workflow struct {
 	Description string                 `json:"description" db:"description"`
 	TenantID    string                 `json:"tenant_id" db:"tenant_id"`
 	Definition  map[string]interface{} `json:"definition" db:"definition"`
-	Status      WorkflowStatus         `json:"status" db:"status"`
+	State       WorkflowState          `json:"state" db:"state"`
 	Tags        []string               `json:"tags" db:"tags"`
 	CreatedAt   time.Time              `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at" db:"updated_at"`
@@ -199,7 +194,7 @@ func (w *Workflow) Clone() *Workflow {
 		Name:        w.Name,
 		Description: w.Description,
 		TenantID:    w.TenantID,
-		Status:      w.Status,
+		State:       w.State,
 		Tags:        make([]string, len(w.Tags)),
 		CreatedAt:   w.CreatedAt,
 		UpdatedAt:   w.UpdatedAt,

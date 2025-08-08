@@ -376,7 +376,7 @@ func (s *RedisStreamSubscription) start(ctx context.Context) {
 	streams := s.setupStreamsAndGroups(ctx)
 
 	// Set up periodic stream rediscovery
-	rediscoveryTicker := time.NewTicker(30 * time.Second) // Rediscover every 30 seconds
+	rediscoveryTicker := time.NewTicker(5 * time.Second) // Rediscover more frequently to pick up new workflow streams
 	defer rediscoveryTicker.Stop()
 
 	for {
@@ -404,15 +404,19 @@ func (s *RedisStreamSubscription) start(ctx context.Context) {
 				continue
 			}
 
-			// Prepare streams for XReadGroup (each stream needs ">")
-			streamArgs := make([]string, 0, len(streams)*2)
+			// Prepare streams for XReadGroup
+			// Redis expects Streams: [s1, s2, ..., id1, id2, ...]
+			names := make([]string, 0, len(streams))
+			ids := make([]string, 0, len(streams))
 			for _, stream := range streams {
 				if stream == "" {
 					s.logger.Error("Empty stream name detected, skipping", "streams", streams)
 					continue
 				}
-				streamArgs = append(streamArgs, stream, ">")
+				names = append(names, stream)
+				ids = append(ids, ">")
 			}
+			streamArgs := append(names, ids...)
 
 			// Skip if no valid streams after filtering
 			if len(streamArgs) == 0 {

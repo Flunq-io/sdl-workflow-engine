@@ -22,7 +22,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultTheme="system"
         enableSystem
         disableTransitionOnChange
-        suppressHydrationWarning
       >
         <GlobalDropdownProvider>
           {children}
