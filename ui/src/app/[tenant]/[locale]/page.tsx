@@ -43,7 +43,7 @@ export default function TenantDashboard() {
     <div>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-foreground mb-2">
-          Workflow Executions - {tenant}
+          Workflow Executions
         </h1>
         <p className="text-muted-foreground">
           Monitor and track your workflow execution instances

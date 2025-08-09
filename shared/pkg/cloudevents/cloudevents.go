@@ -56,7 +56,7 @@ const (
 	ExecutionPaused    = "io.flunq.execution.paused"
 	ExecutionResumed   = "io.flunq.execution.resumed"
 
-	// Task Events (Temporal-like granular tracking)
+	// Task Events (granular task tracking)
 	TaskScheduled = "io.flunq.task.scheduled"
 	TaskStarted   = "io.flunq.task.started"
 	TaskCompleted = "io.flunq.task.completed"

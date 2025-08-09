@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { Workflow, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LanguageThemeSwitcher } from './language-theme-switcher'
+import { useTranslations } from 'next-intl'
 
 interface HeaderProps {
   tenant?: string;
@@ -13,12 +14,13 @@ interface HeaderProps {
 
 export function Header({ tenant, locale }: HeaderProps = {}) {
   const pathname = usePathname()
+  const t = useTranslations()
 
   const isWorkflowsActive = pathname?.includes('/workflows')
   const isExecutionsActive = pathname?.includes('/executions')
 
   return (
-    <header className="border-b border-border bg-card">
+    <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <Link href={tenant ? `/${tenant}/${locale}` : `/${locale}`} className="flex items-center space-x-3">
@@ -27,9 +29,9 @@ export function Header({ tenant, locale }: HeaderProps = {}) {
             </div>
             <div>
               <h1 className="text-xl font-bold text-foreground">
-                Flunq.io {tenant && `- ${tenant}`}
+                {t('header.title')}
               </h1>
-              <p className="text-xs text-muted-foreground">Execution Monitor</p>
+              <p className="text-xs text-muted-foreground">{t('header.subtitle')}</p>
             </div>
           </Link>
 
@@ -43,7 +45,7 @@ export function Header({ tenant, locale }: HeaderProps = {}) {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                Workflows
+                {t('navigation.workflows')}
               </Link>
               <Link
                 href={`/${tenant}/${locale}/executions`}
@@ -53,7 +55,7 @@ export function Header({ tenant, locale }: HeaderProps = {}) {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                Executions
+                {t('navigation.executions')}
               </Link>
             </nav>
           )}
@@ -66,7 +68,7 @@ export function Header({ tenant, locale }: HeaderProps = {}) {
               className="hidden sm:flex"
             >
               <ExternalLink className="h-4 w-4 mr-2" />
-              API
+              {t('navigation.api')}
             </Button>
 
             <LanguageThemeSwitcher />

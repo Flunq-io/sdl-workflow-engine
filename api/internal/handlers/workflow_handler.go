@@ -116,10 +116,24 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 		return
 	}
 
-	workflow, err := h.workflowService.GetWorkflow(c.Request.Context(), workflowID)
+	// Tenant awareness: allow explicit tenant via header or query param to scope the read
+	tenantID := c.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = c.Query("tenant_id")
+	}
+	var (
+		workflow *models.WorkflowDetail
+		err      error
+	)
+	if tenantID != "" {
+		workflow, err = h.workflowService.GetWorkflowByTenant(c.Request.Context(), tenantID, workflowID)
+	} else {
+		workflow, err = h.workflowService.GetWorkflow(c.Request.Context(), workflowID)
+	}
 	if err != nil {
 		h.logger.Error("Failed to get workflow",
 			zap.String("workflow_id", workflowID),
+			zap.String("tenant_id", tenantID),
 			zap.Error(err))
 
 		if err == services.ErrWorkflowNotFound {
@@ -377,10 +391,26 @@ func (h *WorkflowHandler) GetExecutions(c *gin.Context) {
 		WorkflowID: workflowID,
 	}
 
-	executions, total, err := h.workflowService.GetWorkflowExecutions(c.Request.Context(), workflowID, params)
+	// Respect tenant if provided via header or query
+	tenantID := c.GetHeader("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = c.Query("tenant_id")
+	}
+
+	var (
+		executions []models.Execution
+		total      int
+		err        error
+	)
+	if tenantID != "" {
+		executions, total, err = h.workflowService.GetWorkflowExecutionsByTenant(c.Request.Context(), tenantID, workflowID, params)
+	} else {
+		executions, total, err = h.workflowService.GetWorkflowExecutions(c.Request.Context(), workflowID, params)
+	}
 	if err != nil {
 		h.logger.Error("Failed to get workflow executions",
 			zap.String("workflow_id", workflowID),
+			zap.String("tenant_id", tenantID),
 			zap.Error(err))
 
 		if err == services.ErrWorkflowNotFound {

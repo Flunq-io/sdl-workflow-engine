@@ -7,8 +7,10 @@ import { ClientOnly } from '@/components/client-only'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 export default function WorkflowsPage() {
+  const t = useTranslations()
   const params = useParams<{ tenant: string; locale: string }>()
   const tenant = String(params.tenant)
   const locale = String(params.locale)
@@ -35,7 +37,7 @@ export default function WorkflowsPage() {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <h2 className="text-lg font-semibold text-foreground mb-2">Failed to load workflows</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-2">{t('workflows.noWorkflows')}</h2>
           <p className="text-muted-foreground">{error.message}</p>
         </div>
       </div>
@@ -47,18 +49,18 @@ export default function WorkflowsPage() {
       <div className="mb-8 flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-foreground mb-2">
-            Workflows - {tenant}
+            {t('workflows.title')}
           </h1>
           <p className="text-muted-foreground">
-            Manage and execute workflows for tenant {tenant}
+            {t('workflows.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={() => window.location.href = `/${tenant}/${locale}/executions`}
           >
-            View Executions
+            {t('navigation.executions')}
           </Button>
         </div>
       </div>

@@ -6,6 +6,8 @@ import { Workflow } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { SortableTable, Column } from '@/components/common/sortable-table'
+import { CardGrid } from '@/components/common/card-grid'
 import {
   Calendar,
   Pause,
@@ -15,6 +17,7 @@ import {
   Table
 } from 'lucide-react'
 import { formatRelativeTime, formatAbsoluteTime } from '@/lib/utils'
+import { useTranslations } from 'next-intl'
 
 interface WorkflowListProps {
   workflows: Workflow[]
@@ -59,6 +62,7 @@ function getStateVariant(state: Workflow['state']) {
 }
 
 export function WorkflowList({ workflows, tenant = '', locale = 'en' }: WorkflowListProps) {
+  const t = useTranslations()
   const [filter, setFilter] = useState<'all' | Workflow['state']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
 
@@ -82,7 +86,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
             size="sm"
             onClick={() => setFilter('all')}
           >
-            All ({workflows.length})
+            {t('common.all')} ({workflows.length})
           </Button>
           {(['active', 'inactive'] as const).map(state => {
             const count = stateCounts[state] || 0
@@ -96,7 +100,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
                 onClick={() => setFilter(state)}
                 className="capitalize"
               >
-                {state} ({count})
+                {t(`status.${state}`)} ({count})
               </Button>
             )
           })}
@@ -110,7 +114,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
             onClick={() => setViewMode('cards')}
           >
             <LayoutGrid className="h-4 w-4 mr-1" />
-            Cards
+            {t('api.view.cards')}
           </Button>
           <Button
             variant={viewMode === 'table' ? 'default' : 'outline'}
@@ -118,7 +122,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
             onClick={() => setViewMode('table')}
           >
             <Table className="h-4 w-4 mr-1" />
-            Table
+            {t('api.view.table')}
           </Button>
         </div>
       </div>
@@ -126,17 +130,17 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
       {/* Workflow Content */}
       {filteredWorkflows.length === 0 ? (
         <div className="text-center py-12">
-          <h3 className="text-lg font-semibold text-foreground mb-2">No workflows found</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-2">{t('workflows.noWorkflows')}</h3>
           <p className="text-muted-foreground">
             {filter === 'all'
-              ? 'Create your first workflow to get started'
-              : `No workflows found with status: ${filter}`
+              ? t('workflows.noWorkflowsDescription')
+              : t('workflows.noWorkflowsFiltered', {status: filter})
             }
           </p>
         </div>
       ) : viewMode === 'cards' ? (
         // Cards View
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <CardGrid>
           {filteredWorkflows.map((workflow) => {
             const taskNames = extractTaskNames(workflow.definition)
             const taskSummary = getTaskSummary(taskNames)
@@ -148,7 +152,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
                     <div className="space-y-1">
                       <CardTitle className="text-lg">{workflow.name}</CardTitle>
                       <p className="text-sm text-muted-foreground line-clamp-2">
-                        {workflow.description || 'No description'}
+                        {workflow.description || t('workflowDetail.noDescription')}
                       </p>
                     </div>
                     <Badge variant={getStateVariant(workflow.state)} className="flex items-center gap-1">
@@ -157,7 +161,7 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
                     </Badge>
                   </div>
                 </CardHeader>
-              
+
               <CardContent className="space-y-4">
                 {/* Task Summary */}
                 <div className="flex items-center gap-2 text-sm">
@@ -172,25 +176,25 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
                       title={formatAbsoluteTime(workflow.created_at, locale)}
                       className="cursor-help"
                     >
-                      Created {formatRelativeTime(workflow.created_at, locale)}
+                      {t('common.created')} {formatRelativeTime(workflow.created_at, locale)}
                     </span>
                   </div>
                 </div>
-                
+
                 {workflow.execution_count !== undefined && (
                   <div className="text-sm text-muted-foreground">
-                    {workflow.execution_count} execution{workflow.execution_count !== 1 ? 's' : ''}
+                    {t('workflows.executionCount', {count: workflow.execution_count ?? 0})}
                     {workflow.last_execution && (
                       <span
                         className="ml-2 cursor-help"
                         title={formatAbsoluteTime(workflow.last_execution, locale)}
                       >
-                        • Last: {formatRelativeTime(workflow.last_execution, locale)}
+                        • {t('workflows.lastExecution', {time: formatRelativeTime(workflow.last_execution, locale)})}
                       </span>
                     )}
                   </div>
                 )}
-                
+
                 {workflow.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {workflow.tags.slice(0, 3).map((tag) => (
@@ -205,12 +209,12 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
                     )}
                   </div>
                 )}
-                
+
                 <div className="flex gap-2 pt-2">
                   <Button asChild size="sm" variant={'outline'} className="flex-1 text-blue-500">
                     <Link href={`/${tenant}/${locale}/workflows/${workflow.id}`}>
                       <Eye className="h-4 w-4 mr-1" />
-                      View
+                      {t('common.view')}
                     </Link>
                   </Button>
                 </div>
@@ -218,84 +222,98 @@ export function WorkflowList({ workflows, tenant = '', locale = 'en' }: Workflow
             </Card>
             )
           })}
-        </div>
+        </CardGrid>
       ) : (
         // Table View
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left p-4 font-medium">Name</th>
-                <th className="text-left p-4 font-medium">Status</th>
-                <th className="text-left p-4 font-medium">Tasks</th>
-                <th className="text-left p-4 font-medium">Created</th>
-                <th className="text-left p-4 font-medium">Executions</th>
-                <th className="text-left p-4 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredWorkflows.map((workflow) => {
-                const taskNames = extractTaskNames(workflow.definition)
-
+        <SortableTable
+          columns={[
+            {
+              id: 'name',
+              header: 'Name',
+              sortable: true,
+              accessor: (w: Workflow) => w.name,
+              cell: (w: Workflow) => (
+                <div>
+                  <div className="font-medium">{w.name}</div>
+                  <div className="text-sm text-muted-foreground line-clamp-1">
+                    {w.description || 'No description'}
+                  </div>
+                </div>
+              )
+            },
+            {
+              id: 'status',
+              header: 'Status',
+              sortable: true,
+              accessor: (w: Workflow) => w.state,
+              cell: (w: Workflow) => (
+                <Badge variant={getStateVariant(w.state)} className="flex items-center gap-1 w-fit">
+                  {getStateIcon(w.state)}
+                  {w.state}
+                </Badge>
+              )
+            },
+            {
+              id: 'tasks',
+              header: 'Tasks',
+              accessor: (w: Workflow) => extractTaskNames(w.definition).length,
+              cell: (w: Workflow) => {
+                const taskNames = extractTaskNames(w.definition)
                 return (
-                  <tr key={workflow.id} className="border-t hover:bg-muted/25">
-                    <td className="p-4">
-                      <div>
-                        <div className="font-medium">{workflow.name}</div>
-                        <div className="text-sm text-muted-foreground line-clamp-1">
-                          {workflow.description || 'No description'}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <Badge variant={getStateVariant(workflow.state)} className="flex items-center gap-1 w-fit">
-                        {getStateIcon(workflow.state)}
-                        {workflow.state}
-                      </Badge>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm">
-                        {taskNames.length} task{taskNames.length !== 1 ? 's' : ''}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <span
-                        title={formatAbsoluteTime(workflow.created_at, locale)}
-                        className="cursor-help text-sm"
-                      >
-                        {formatRelativeTime(workflow.created_at, locale)}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm">
-                        {workflow.execution_count !== undefined ? (
-                          <span>
-                            {workflow.execution_count} execution{workflow.execution_count !== 1 ? 's' : ''}
-                            {workflow.last_execution && (
-                              <div className="text-xs text-muted-foreground">
-                                Last: {formatRelativeTime(workflow.last_execution, locale)}
-                              </div>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={`/${tenant}/${locale}/workflows/${workflow.id}`}>
-                          <Eye className="h-4 w-4 mr-1" />
-                          View
-                        </Link>
-                      </Button>
-                    </td>
-                  </tr>
+                  <div className="text-sm">
+                    {t('workflows.taskSummary.default', {count: taskNames.length, tasks: taskNames.slice(0, 3).join(', ')})}
+                  </div>
                 )
-              })}
-            </tbody>
-          </table>
-        </div>
+              }
+            },
+            {
+              id: 'created',
+              header: 'Created',
+              sortable: true,
+              accessor: (w: Workflow) => w.created_at,
+              cell: (w: Workflow) => (
+                <span title={formatAbsoluteTime(w.created_at, locale)} className="cursor-help text-sm">
+                  {formatRelativeTime(w.created_at, locale)}
+                </span>
+              )
+            },
+            {
+              id: 'executions',
+              header: 'Executions',
+              accessor: (w: Workflow) => w.execution_count ?? 0,
+              cell: (w: Workflow) => (
+                <div className="text-sm">
+                  {w.execution_count !== undefined ? (
+                    <span>
+                      {t('workflows.executionCount', {count: w.execution_count ?? 0})}
+                      {w.last_execution && (
+                        <div className="text-xs text-muted-foreground">
+                          {t('workflows.lastExecution', {time: formatRelativeTime(w.last_execution, locale)})}
+                        </div>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </div>
+              )
+            },
+            {
+              id: 'actions',
+              header: 'Actions',
+              cell: (w: Workflow) => (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/${tenant}/${locale}/workflows/${w.id}`}>
+                    <Eye className="h-4 w-4 mr-1" />
+                    {t('common.view')}
+                  </Link>
+                </Button>
+              )
+            }
+          ] as Column<Workflow>[]}
+          data={filteredWorkflows}
+          initialSort={{ columnId: 'created', direction: 'desc' }}
+        />
       )}
     </div>
   )

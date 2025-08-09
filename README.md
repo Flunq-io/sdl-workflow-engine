@@ -5,17 +5,17 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐           ┌─────────────┐           ┌─────────────┐
-│   API       │───┐   ┌──▶│  Worker     │◀──┐   ┌──▶│  Executor   │
-│   Service   │   │   │   │  Service    │   │   │   │  Service    │
-└─────────────┘   │   │   └─────────────┘   │   │   └─────────────┘
-                  │   │                      │   │
-                  ▼   ▼                      ▼   ▼
-           ┌────────────────┐        ┌──────────────────┐
-           │ Shared Event   │        │ Shared Database  │
-           │ Stream (Redis) │        │ (Redis -> pluggable)
-           │ -> pluggable   │        │ Postgres/Mongo…  │
-           └────────────────┘        └──────────────────┘
+┌─────────────┐       HTTP/WS       ┌─────────────┐           ┌─────────────┐           ┌─────────────┐
+│     UI      │ ───────────────────▶│    API      │───┐   ┌──▶│   Worker    │◀──┐   ┌──▶│  Executor   │
+│   Service   │                      │   Service   │   │   │   │   Service   │   │   │   │  Service    │
+└─────────────┘                      └─────────────┘   │   │   └─────────────┘   │   │   └─────────────┘
+                                                      │   │                      │   │
+                                                      ▼   ▼                      ▼   ▼
+                                             ┌────────────────┐        ┌──────────────────┐
+                                             │ Shared Event   │        │ Shared Database  │
+                                             │ Stream (Redis) │        │ (Redis -> pluggable)
+                                             │ -> pluggable   │        │ Postgres/Mongo…  │
+                                             └────────────────┘        └──────────────────┘
 
 Backends are selected via env and factories:
 - EVENT_STREAM_TYPE: redis (default), kafka, rabbitmq, nats
@@ -29,10 +29,10 @@ Backends are selected via env and factories:
 - **Purpose**: HTTP API server, DSL parsing, workflow orchestration
 - **Features**: REST/GraphQL endpoints, workflow validation, execution control
 
-### **EventStore Library** (`/worker/pkg/eventstore`)
+### **EventStore Library** (`shared/pkg/eventstreaming`)
 - **Language**: Go
 - **Purpose**: Pluggable event storage and streaming - the nervous system of the workflow engine
-- **Features**: Event sourcing, Temporal-level resilience, pluggable backends (Redis/Kafka/RabbitMQ)
+- **Features**: Event sourcing, resilient design, pluggable backends (Redis/Kafka/RabbitMQ)
 
 ### **Worker Service** (`/worker`)
 - **Language**: Go  

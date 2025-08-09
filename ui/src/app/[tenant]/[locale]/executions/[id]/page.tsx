@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { formatAbsoluteTime, formatAbsoluteTimeCompact, formatRelativeTime } from '@/lib/utils'
+import { useTranslations } from 'next-intl'
 
 function getStatusColor(status: string) {
   switch (status.toLowerCase()) {
@@ -28,6 +29,7 @@ function getStatusColor(status: string) {
 }
 
 export default function ExecutionDetailPage() {
+  const t = useTranslations()
   const params = useParams<{ tenant: string; locale: string; id: string }>()
   const tenant = String(params.tenant)
   const locale = String(params.locale)
@@ -99,15 +101,15 @@ export default function ExecutionDetailPage() {
             <Button asChild variant="outline" size="sm">
               <Link href={`/${tenant}/${locale}/executions`}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back
+                {t('common.back')}
               </Link>
             </Button>
             <h1 className="text-2xl font-bold text-foreground">
-              Execution Details
+              {t('executions.viewDetails')}
             </h1>
           </div>
           <p className="text-muted-foreground">
-            Execution ID: <code className="bg-muted px-2 py-1 rounded text-sm">{execution.id}</code>
+            {t('executions.executionId')}: <code className="bg-muted px-2 py-1 rounded text-sm">{execution.id}</code>
           </p>
         </div>
         <Badge className={getStatusColor(execution.status)}>
@@ -118,31 +120,31 @@ export default function ExecutionDetailPage() {
       {/* Execution Info Card */}
       <Card>
         <CardHeader>
-          <CardTitle>Execution Information</CardTitle>
+          <CardTitle>{t('executions.viewDetails')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm font-medium text-muted-foreground">Workflow ID</label>
+              <label className="text-sm font-medium text-muted-foreground">{t('executions.workflowName')}</label>
               <p className="text-sm font-mono bg-muted px-2 py-1 rounded">{execution.workflow_id}</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <p className="text-sm">
+              <label className="text-sm font-medium text-muted-foreground">{t('common.status')}</label>
+              <div className="text-sm">
                 <Badge className={getStatusColor(execution.status)}>
                   {execution.status}
                 </Badge>
-              </p>
+              </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-muted-foreground">Started At</label>
+              <label className="text-sm font-medium text-muted-foreground">{t('executions.startedAt')}</label>
               <p className="text-sm">
                 {formatAbsoluteTimeCompact(execution.started_at, locale)} ({formatRelativeTime(execution.started_at, locale)})
               </p>
             </div>
             {execution.completed_at && (
               <div>
-                <label className="text-sm font-medium text-muted-foreground">Completed At</label>
+                <label className="text-sm font-medium text-muted-foreground">{t('common.completed')}</label>
                 <p className="text-sm">
                   {formatAbsoluteTime(execution.completed_at, locale)} ({formatRelativeTime(execution.completed_at, locale)})
                 </p>

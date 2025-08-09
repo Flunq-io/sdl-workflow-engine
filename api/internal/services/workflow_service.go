@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -158,6 +159,19 @@ func (s *WorkflowService) GetWorkflow(ctx context.Context, workflowID string) (*
 		return nil, fmt.Errorf("failed to get workflow: %w", err)
 	}
 
+	return workflow, nil
+}
+
+// GetWorkflowByTenant retrieves a workflow by ID with explicit tenant scoping
+func (s *WorkflowService) GetWorkflowByTenant(ctx context.Context, tenantID string, workflowID string) (*models.WorkflowDetail, error) {
+	workflow, err := s.workflowAdapter.GetByIDWithTenant(ctx, tenantID, workflowID)
+	if err != nil {
+		if isNotFoundError(err) {
+			return nil, ErrWorkflowNotFound
+		}
+		s.logger.Error("Failed to get workflow from repository (tenant)", zap.String("tenant_id", tenantID), zap.Error(err))
+		return nil, fmt.Errorf("failed to get workflow: %w", err)
+	}
 	return workflow, nil
 }
 
@@ -476,7 +490,74 @@ func (s *WorkflowService) GetWorkflowExecutions(ctx context.Context, workflowID 
 		return nil, 0, fmt.Errorf("failed to list executions: %w", err)
 	}
 
+	// Sort by start date (newest first); if StartedAt is zero, fallback to CompletedAt
+	sort.Slice(executions, func(i, j int) bool {
+		si := executions[i].StartedAt
+		sj := executions[j].StartedAt
+		if si.IsZero() && executions[i].CompletedAt != nil {
+			si = *executions[i].CompletedAt
+		}
+		if sj.IsZero() && executions[j].CompletedAt != nil {
+			sj = *executions[j].CompletedAt
+		}
+		return si.After(sj)
+	})
+
 	s.logger.Info("Retrieved workflow executions",
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", wf.Workflow.TenantID),
+		zap.Int("total_executions", total))
+
+	return executions, total, nil
+}
+
+// GetWorkflowExecutionsByTenant ensures the workflow exists for the given tenant before listing executions
+func (s *WorkflowService) GetWorkflowExecutionsByTenant(ctx context.Context, tenantID string, workflowID string, params *models.ExecutionListParams) ([]models.Execution, int, error) {
+	s.logger.Debug("Getting workflow executions (tenant)",
+		zap.String("workflow_id", workflowID),
+		zap.String("tenant_id", tenantID))
+
+	// Ensure workflow exists scoped to tenant
+	wf, err := s.workflowAdapter.GetByIDWithTenant(ctx, tenantID, workflowID)
+	if err != nil {
+		if isNotFoundError(err) {
+			return nil, 0, ErrWorkflowNotFound
+		}
+		s.logger.Error("Failed to get workflow from adapter (tenant)",
+			zap.String("workflow_id", workflowID),
+			zap.String("tenant_id", tenantID),
+			zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to get workflow: %w", err)
+	}
+
+	// Use the execution repository (not yet tenant-scoped)
+	if params == nil {
+		params = &models.ExecutionListParams{}
+	}
+	params.WorkflowID = workflowID
+
+	executions, total, err := s.executionRepo.List(ctx, params)
+	if err != nil {
+		s.logger.Error("Failed to list executions from repository",
+			zap.String("workflow_id", workflowID),
+			zap.Error(err))
+		return nil, 0, fmt.Errorf("failed to list executions: %w", err)
+	}
+
+	// Sort by start date (newest first); if StartedAt is zero, fallback to CompletedAt
+	sort.Slice(executions, func(i, j int) bool {
+		si := executions[i].StartedAt
+		sj := executions[j].StartedAt
+		if si.IsZero() && executions[i].CompletedAt != nil {
+			si = *executions[i].CompletedAt
+		}
+		if sj.IsZero() && executions[j].CompletedAt != nil {
+			sj = *executions[j].CompletedAt
+		}
+		return si.After(sj)
+	})
+
+	s.logger.Info("Retrieved workflow executions (tenant)",
 		zap.String("workflow_id", workflowID),
 		zap.String("tenant_id", wf.Workflow.TenantID),
 		zap.Int("total_executions", total))

@@ -2,7 +2,7 @@
   "common": {
     "loading": "Chargement...",
     "error": "Erreur",
-    "retry": "Réessayer",
+    "refresh": "Actualiser",
     "cancel": "Annuler",
     "save": "Enregistrer",
     "delete": "Supprimer",
@@ -116,7 +116,9 @@
     "suspended": "suspendu",
     "cancelled": "annulé",
     "faulted": "en erreur",
-    "completed": "terminé"
+    "completed": "terminé",
+    "active": "actif",
+    "inactive": "inactif"
   },
   "language": {
     "select": "Sélectionner la langue",

@@ -3,6 +3,8 @@ package processor
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -31,6 +33,11 @@ type WorkflowProcessor struct {
 	running bool
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
+	// Per-event workers waitgroup (for graceful shutdown when concurrency > 1)
+	tasksWG sync.WaitGroup
+	// Concurrency control
+	maxConcurrency int
+	sem            chan struct{}
 
 	// Workflow processing locks (one per workflow to prevent concurrent processing)
 	workflowLocks map[string]*sync.Mutex
@@ -47,6 +54,13 @@ func NewWorkflowProcessor(
 	logger interfaces.Logger,
 	metrics interfaces.Metrics,
 ) interfaces.WorkflowProcessor {
+	// Determine concurrency from env (default 4)
+	maxConc := 4
+	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConc = n
+		}
+	}
 	return &WorkflowProcessor{
 		eventStream:    eventStream,
 		database:       database,
@@ -57,6 +71,8 @@ func NewWorkflowProcessor(
 		metrics:        metrics,
 		stopCh:         make(chan struct{}),
 		workflowLocks:  make(map[string]*sync.Mutex),
+		maxConcurrency: maxConc,
+		sem:            make(chan struct{}, maxConc),
 	}
 }
 
@@ -108,6 +124,18 @@ func (p *WorkflowProcessor) Stop(ctx context.Context) error {
 
 	// Wait for processing to complete
 	p.wg.Wait()
+	// Wait for in-flight tasks to finish or context timeout
+	done := make(chan struct{})
+	go func() {
+		p.tasksWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// ok
+	case <-ctx.Done():
+		p.logger.Warn("Timeout waiting for in-flight tasks to finish")
+	}
 
 	p.logger.Info("Workflow processor stopped")
 	return nil
@@ -130,24 +158,32 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 		case event := <-p.eventCh:
 			p.logger.Debug("Received event from eventCh", "event_present", event != nil)
 			if event != nil {
-				p.logger.Debug("Processing event", "event_type", event.Type, "event_id", event.ID)
-				if err := p.ProcessWorkflowEvent(ctx, event); err != nil {
-					// Extract workflow ID from event extensions
-					workflowID := ""
-					if wfID, ok := event.Extensions["workflowid"].(string); ok {
-						workflowID = wfID
+				// Acquire concurrency slot
+				p.sem <- struct{}{}
+				p.tasksWG.Add(1)
+				go func(ev *cloudevents.CloudEvent) {
+					defer func() {
+						<-p.sem
+						p.tasksWG.Done()
+					}()
+					p.logger.Debug("Processing event", "event_type", ev.Type, "event_id", ev.ID)
+					if err := p.ProcessWorkflowEvent(ctx, ev); err != nil {
+						// Extract workflow ID from event extensions
+						workflowID := ""
+						if wfID, ok := ev.Extensions["workflowid"].(string); ok {
+							workflowID = wfID
+						}
+						p.logger.Error("Failed to process workflow event",
+							"event_id", ev.ID,
+							"event_type", ev.Type,
+							"workflow_id", workflowID,
+							"error", err)
+						p.metrics.IncrementCounter("workflow_event_processing_errors", map[string]string{
+							"event_type":  ev.Type,
+							"workflow_id": workflowID,
+						})
 					}
-
-					p.logger.Error("Failed to process workflow event",
-						"event_id", event.ID,
-						"event_type", event.Type,
-						"workflow_id", workflowID,
-						"error", err)
-					p.metrics.IncrementCounter("workflow_event_processing_errors", map[string]string{
-						"event_type":  event.Type,
-						"workflow_id": workflowID,
-					})
-				}
+				}(event)
 			}
 		case err := <-p.errorCh:
 			if err != nil {

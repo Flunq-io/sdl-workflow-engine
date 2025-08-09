@@ -3,6 +3,8 @@ package processor
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +24,10 @@ type TaskProcessor struct {
 	subscription interfaces.StreamSubscription
 	running      bool
 	wg           sync.WaitGroup
+
+	// Concurrency control for task processing
+	maxConcurrency int
+	sem            chan struct{}
 }
 
 // NewTaskProcessor creates a new TaskProcessor
@@ -30,10 +36,19 @@ func NewTaskProcessor(
 	taskExecutors map[string]executor.TaskExecutor,
 	logger *zap.Logger,
 ) *TaskProcessor {
+	// Determine concurrency from env (default 4)
+	maxConc := 4
+	if v := os.Getenv("EXECUTOR_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConc = n
+		}
+	}
 	return &TaskProcessor{
-		eventStream:   eventStream,
-		taskExecutors: taskExecutors,
-		logger:        logger,
+		eventStream:    eventStream,
+		taskExecutors:  taskExecutors,
+		logger:         logger,
+		maxConcurrency: maxConc,
+		sem:            make(chan struct{}, maxConc),
 	}
 }
 
@@ -101,12 +116,17 @@ func (p *TaskProcessor) processEvents(ctx context.Context) {
 	for p.running {
 		select {
 		case event := <-p.subscription.Events():
-			if err := p.processTaskEvent(ctx, event); err != nil {
-				p.logger.Error("Failed to process task event",
-					zap.String("event_id", event.ID),
-					zap.String("event_type", event.Type),
-					zap.Error(err))
-			}
+			// Concurrency gate
+			p.sem <- struct{}{}
+			go func(ev *cloudevents.CloudEvent) {
+				defer func() { <-p.sem }()
+				if err := p.processTaskEvent(ctx, ev); err != nil {
+					p.logger.Error("Failed to process task event",
+						zap.String("event_id", ev.ID),
+						zap.String("event_type", ev.Type),
+						zap.Error(err))
+				}
+			}(event)
 		case err := <-p.subscription.Errors():
 			p.logger.Error("Event stream error", zap.Error(err))
 		case <-ctx.Done():

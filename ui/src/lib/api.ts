@@ -73,15 +73,18 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    // Build URL with tenant context if available
-    const apiPath = this.tenantId ? `/api/v1/${this.tenantId}${endpoint}` : `/api/v1${endpoint}`
-    const url = `${this.baseUrl}${apiPath}`
+    const method = (options?.method || 'GET').toUpperCase()
 
-    console.log('🔍 API Request:', url)
+    // Primary: non-tenant path (matches handlers: GET /api/v1/workflows...)
+    const apiPath = `/api/v1${endpoint}`
+    let url = `${this.baseUrl}${apiPath}`
 
-    const response = await fetch(url, {
+    console.log('🔍 API Request:', { url, method })
+
+    let response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
+        ...(this.tenantId ? { 'X-Tenant-ID': this.tenantId } : {}),
         ...options?.headers,
       },
       ...options,
@@ -89,10 +92,41 @@ class ApiClient {
 
     console.log('📡 API Response:', response.status, response.statusText)
 
+    // Fallback: if 404 and tenantId is set, retry with tenant-prefixed path
+    if (response.status === 404 && this.tenantId && method === 'GET' && !endpoint.startsWith(`/${this.tenantId}/`)) {
+      const tenantPath = `/api/v1/${this.tenantId}${endpoint}`
+      const tenantUrl = `${this.baseUrl}${tenantPath}`
+      console.warn('🔁 Retrying with tenant-prefixed path', { tenantUrl })
+      response = await fetch(tenantUrl, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.tenantId ? { 'X-Tenant-ID': this.tenantId } : {}),
+          ...options?.headers,
+        },
+        ...options,
+      })
+      url = tenantUrl
+    }
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Unknown error' }))
-      console.error('❌ API Error:', error)
-      throw new Error(error.message || `HTTP ${response.status}`)
+      let errorBody: any = undefined
+      try {
+        // Try JSON first, else fall back to text
+        errorBody = await response.clone().json()
+      } catch {
+        try {
+          errorBody = { message: await response.text() }
+        } catch {
+          errorBody = { message: 'Unknown error' }
+        }
+      }
+      console.warn('API request failed', {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        error: errorBody
+      })
+      throw new Error(errorBody?.message || `HTTP ${response.status}`)
     }
 
     return response.json()
@@ -113,7 +147,10 @@ class ApiClient {
   }
 
   async executeWorkflow(id: string, input: Record<string, unknown>, correlationId?: string): Promise<Execution> {
-    return this.request(`/workflows/${id}/execute`, {
+    if (!this.tenantId) {
+      throw new Error('tenant_id is required to execute a workflow')
+    }
+    return this.request(`/${this.tenantId}/workflows/${id}/execute`, {
       method: 'POST',
       body: JSON.stringify({
         input,

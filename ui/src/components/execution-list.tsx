@@ -6,6 +6,8 @@ import { Execution } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { SortableTable, Column } from '@/components/common/sortable-table'
+import { CardGrid } from '@/components/common/card-grid'
 import {
   Clock,
   Calendar,
@@ -20,7 +22,8 @@ import {
   Table,
   Workflow
 } from 'lucide-react'
-import { formatDurationHMS, formatDatePairUltraCompact, isDisplayableDate } from '@/lib/utils'
+import { formatDurationHMS, formatDatePairUltraCompact } from '@/lib/utils'
+import { useTranslations } from 'next-intl'
 
 interface ExecutionListProps {
   executions: (Execution & { workflow_name?: string })[]
@@ -87,6 +90,7 @@ function formatDuration(durationMs?: number): string {
 }
 
 export function ExecutionList({ executions, tenant = '', locale = 'en' }: ExecutionListProps) {
+  const t = useTranslations()
   const [filter, setFilter] = useState<'all' | Execution['status']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
 
@@ -110,7 +114,7 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
             size="sm"
             onClick={() => setFilter('all')}
           >
-            All ({executions.length})
+            {t('common.all')} ({executions.length})
           </Button>
           {(['pending', 'running', 'waiting', 'suspended', 'cancelled', 'faulted', 'completed'] as const).map(status => {
             const count = statusCounts[status] || 0
@@ -124,7 +128,7 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
                 onClick={() => setFilter(status)}
                 className="capitalize"
               >
-                {status} ({count})
+                {t(`status.${status}`)} ({count})
               </Button>
             )
           })}
@@ -138,7 +142,7 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
             onClick={() => setViewMode('cards')}
           >
             <LayoutGrid className="h-4 w-4 mr-1" />
-            Cards
+            {t('api.view.cards')}
           </Button>
           <Button
             variant={viewMode === 'table' ? 'default' : 'outline'}
@@ -146,7 +150,7 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
             onClick={() => setViewMode('table')}
           >
             <Table className="h-4 w-4 mr-1" />
-            Table
+            {t('api.view.table')}
           </Button>
         </div>
       </div>
@@ -154,17 +158,17 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
       {/* Execution Content */}
       {filteredExecutions.length === 0 ? (
         <div className="text-center py-12">
-          <h3 className="text-lg font-semibold text-foreground mb-2">No executions found</h3>
+          <h3 className="text-lg font-semibold text-foreground mb-2">{t('executions.noExecutions')}</h3>
           <p className="text-muted-foreground">
             {filter === 'all'
-              ? 'Execute a workflow to see executions here'
-              : `No executions found with status: ${filter}`
+              ? t('executions.noExecutionsDescription')
+              : t('executions.noExecutionsFiltered', {status: filter})
             }
           </p>
         </div>
       ) : viewMode === 'cards' ? (
         // Cards View
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <CardGrid>
           {filteredExecutions.map((execution) => (
             <Card key={execution.id} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
@@ -174,16 +178,16 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
                       {execution.workflow_name || execution.workflow_id}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      Execution: {execution.id.slice(0, 8)}...
+                      {t('common.execution')}: {execution.id.slice(0, 8)}...
                     </p>
                   </div>
                   <Badge variant={getStatusVariant(execution.status)} className="flex items-center gap-1">
                     {getStatusIcon(execution.status)}
-                    {execution.status}
+                    {t(`status.${execution.status}`)}
                   </Badge>
                 </div>
               </CardHeader>
-            
+
               <CardContent className="space-y-4">
                 {/* Workflow Info */}
                 <div className="flex items-center gap-2 text-sm">
@@ -196,14 +200,14 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Calendar className="h-4 w-4" />
                     <span className="text-muted-foreground" title={new Date(execution.started_at).toISOString()}>
-                      Started {formatDatePairUltraCompact(execution.started_at, locale)}
+                      {t('executions.startedAt')} {formatDatePairUltraCompact(execution.started_at, locale)}
                     </span>
                   </div>
                   {execution.completed_at && (
                     <div className="flex items-center gap-1 text-muted-foreground">
                       <Clock className="h-4 w-4" />
                       <span className="text-muted-foreground" title={new Date(execution.completed_at).toISOString()}>
-                        Completed {formatDatePairUltraCompact(execution.completed_at, locale)}
+                        {t('common.completed')} {formatDatePairUltraCompact(execution.completed_at, locale)}
                       </span>
                     </div>
                   )}
@@ -211,112 +215,135 @@ export function ExecutionList({ executions, tenant = '', locale = 'en' }: Execut
 
                 {execution.duration_ms && (
                   <div className="text-sm text-muted-foreground">
-                    Duration: {formatDuration(execution.duration_ms)}
+                    {t('common.duration')}: {formatDuration(execution.duration_ms)}
                   </div>
                 )}
-                
+
                 {execution.current_state && (
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Current step: </span>
+                    <span className="text-muted-foreground">{t('executions.currentStep')}: </span>
                     <span className="font-medium">{execution.current_state}</span>
                   </div>
                 )}
-                
+
                 <div className="flex gap-2 pt-2">
                   <Button asChild size="sm" variant={'outline'} className="flex-1 text-blue-500">
                     <Link href={`/${tenant}/${locale}/executions/${execution.id}`}>
                       <Eye className="h-4 w-4 mr-1" />
-                      View
+                      {t('common.view')}
                     </Link>
                   </Button>
                 </div>
               </CardContent>
             </Card>
           ))}
-        </div>
+        </CardGrid>
       ) : (
         // Table View
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left p-4 font-medium">Execution</th>
-                <th className="text-left p-4 font-medium">Workflow</th>
-                <th className="text-left p-4 font-medium">Status</th>
-                <th className="text-left p-4 font-medium">Started</th>
-                <th className="text-left p-4 font-medium">Completed</th>
-                <th className="text-left p-4 font-medium">Duration</th>
-                <th className="text-left p-4 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredExecutions.map((execution) => (
-                <tr key={execution.id} className="border-t hover:bg-muted/25">
-                  <td className="p-4">
-                    <div>
-                      <div className="font-medium font-mono text-sm">{execution.id}</div>
-                      {execution.current_state && (
-                        <div className="text-xs text-muted-foreground">
-                          Step: {execution.current_state}
-                        </div>
-                      )}
+        <SortableTable
+          columns={[
+            {
+              id: 'id',
+              header: t('executions.executionId'),
+              sortable: true,
+              accessor: (e: Execution) => e.id,
+              cell: (e: Execution) => (
+                <div>
+                  <div className="font-medium font-mono text-sm">{e.id}</div>
+                  {e.current_state && (
+                    <div className="text-xs text-muted-foreground">
+                      {t('executions.currentStep')}: {e.current_state}
                     </div>
-                  </td>
-                  <td className="p-4">
-                    <div>
-                      <div className="font-medium">{execution.workflow_name || execution.workflow_id}</div>
-                      <div className="text-sm text-muted-foreground font-mono">
-                        {execution.workflow_id}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <Badge variant={getStatusVariant(execution.status)} className="flex items-center gap-1 w-fit">
-                      {getStatusIcon(execution.status)}
-                      {execution.status}
-                    </Badge>
-                  </td>
-                  <td className="p-4">
-                    <span className="text-sm" title={new Date(execution.started_at).toISOString()}>
-                      {formatDatePairUltraCompact(execution.started_at, locale)}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <span className="text-sm">
-                      {execution.completed_at ? (
-                        <>{formatDatePairUltraCompact(execution.completed_at, locale)}</>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="text-sm">
-                      {execution.duration_ms ? (
-                        <>
-                          {formatDuration(execution.duration_ms)}
-                          <span className="text-muted-foreground"> ({formatDurationHMS(execution.duration_ms)})</span>
-                        </>
-                      ) : execution.status === 'running' ? (
-                        <span className="text-muted-foreground">Running...</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <Button asChild size="sm" variant="outline">
-                      <Link href={`/${tenant}/${locale}/executions/${execution.id}`}>
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  )}
+                </div>
+              )
+            },
+            {
+              id: 'workflow',
+              header: t('executions.workflowName'),
+              sortable: true,
+              accessor: (e: Execution & { workflow_name?: string }) => e.workflow_name || e.workflow_id,
+              cell: (e: Execution & { workflow_name?: string }) => (
+                <div>
+                  <div className="font-medium">{e.workflow_name || e.workflow_id}</div>
+                  <div className="text-sm text-muted-foreground font-mono">{e.workflow_id}</div>
+                </div>
+              )
+            },
+            {
+              id: 'status',
+              header: t('common.status'),
+              sortable: true,
+              accessor: (e: Execution) => e.status,
+              cell: (e: Execution) => (
+                <Badge variant={getStatusVariant(e.status)} className="flex items-center gap-1 w-fit">
+                  {getStatusIcon(e.status)}
+                  {e.status}
+                </Badge>
+              )
+            },
+            {
+              id: 'started_at',
+              header: t('executions.startedAt'),
+              sortable: true,
+              accessor: (e: Execution) => e.started_at,
+              cell: (e: Execution) => (
+                <span className="text-sm" title={new Date(e.started_at).toISOString()}>
+                  {formatDatePairUltraCompact(e.started_at, locale)}
+                </span>
+              )
+            },
+            {
+              id: 'completed_at',
+              header: t('common.completed'),
+              sortable: true,
+              accessor: (e: Execution) => e.completed_at ?? '',
+              cell: (e: Execution) => (
+                <span className="text-sm">
+                  {e.completed_at ? (
+                    <>{formatDatePairUltraCompact(e.completed_at, locale)}</>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </span>
+              )
+            },
+            {
+              id: 'duration',
+              header: t('common.duration'),
+              sortable: true,
+              accessor: (e: Execution) => e.duration_ms ?? 0,
+              cell: (e: Execution) => (
+                <div className="text-sm">
+                  {e.duration_ms ? (
+                    <>
+                      {formatDuration(e.duration_ms)}
+                      <span className="text-muted-foreground"> ({formatDurationHMS(e.duration_ms)})</span>
+                    </>
+                  ) : e.status === 'running' ? (
+                    <span className="text-muted-foreground">Running...</span>
+                  ) : (
+                    <span className="text-muted-foreground">-</span>
+                  )}
+                </div>
+              )
+            },
+            {
+              id: 'actions',
+              header: t('common.actions'),
+              cell: (e: Execution) => (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/${tenant}/${locale}/executions/${e.id}`}>
+                    <Eye className="h-4 w-4 mr-1" />
+                    {t('common.view')}
+                  </Link>
+                </Button>
+              )
+            }
+          ] as Column<Execution>[]}
+          data={filteredExecutions}
+          initialSort={{ columnId: 'started_at', direction: 'desc' }}
+        />
       )}
     </div>
   )

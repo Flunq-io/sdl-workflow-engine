@@ -1,6 +1,6 @@
 # Worker Service
 
-The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration with **Temporal-level resilience** through the unified EventStore interface.
+The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration with enterprise-grade resilience through the unified EventStore interface.
 
 ## 🚀 Features
 
@@ -15,7 +15,7 @@ The Worker service executes Serverless Workflow DSL using the official Serverles
 - ✅ **Redis Implementation**: Current backend using Redis Streams with consumer groups
 - ✅ **Future Backends**: Easy switching to Kafka, RabbitMQ, PostgreSQL via configuration
 - ✅ **Event Sourcing**: Complete event history with deterministic state rebuilding
-- ✅ **Temporal-level Resilience**: Crash recovery, horizontal scaling, time travel debugging
+- ✅ **Enterprise-grade Resilience**: Crash recovery, horizontal scaling, time travel debugging
 
 ### **Core Event Processing Pattern**
 Every workflow event triggers this exact sequence:

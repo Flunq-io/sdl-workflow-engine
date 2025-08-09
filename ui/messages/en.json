@@ -2,6 +2,7 @@
   "common": {
     "loading": "Loading...",
     "error": "Error",
+    "refresh": "Refresh",
     "retry": "Retry",
     "cancel": "Cancel",
     "save": "Save",
@@ -27,6 +28,7 @@
     "workflow": "Workflow",
     "started": "Started",
     "duration": "Duration",
+    "completed": "Completed",
     "actions": "Actions",
     "cards": "Cards",
     "table": "Table"
@@ -118,7 +120,9 @@
     "suspended": "suspended",
     "cancelled": "cancelled",
     "faulted": "faulted",
-    "completed": "completed"
+    "completed": "completed",
+    "active": "active",
+    "inactive": "inactive"
   },
   "language": {
     "select": "Select language",

@@ -2,7 +2,7 @@
   "common": {
     "loading": "加载中...",
     "error": "错误",
-    "retry": "重试",
+    "refresh": "刷新",
     "cancel": "取消",
     "save": "保存",
     "delete": "删除",
@@ -91,7 +91,9 @@
     "suspended": "已暂停",
     "cancelled": "已取消",
     "faulted": "出错",
-    "completed": "已完成"
+    "completed": "已完成",
+    "active": "启用",
+    "inactive": "未启用"
   },
   "language": {
     "select": "选择语言",

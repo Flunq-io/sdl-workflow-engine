@@ -2,7 +2,7 @@
   "common": {
     "loading": "Laden...",
     "error": "Fout",
-    "retry": "Opnieuw proberen",
+    "refresh": "Verversen",
     "cancel": "Annuleren",
     "save": "Opslaan",
     "delete": "Verwijderen",
@@ -17,11 +17,21 @@
     "all": "Alle",
     "none": "Geen",
     "yes": "Ja",
-    "no": "Nee"
+    "no": "Nee",
+    "name": "Naam",
+    "status": "Status",
+    "tasks": "Taken",
+    "created": "Aangemaakt",
+    "executions": "Uitvoeringen",
+    "actions": "Acties",
+    "duration": "Duur",
+    "completed": "Voltooid",
+    "execution": "Uitvoering",
+    "view": "Bekijken"
   },
   "header": {
     "title": "Flunq.io",
-    "subtitle": "Workflow Engine",
+    "subtitle": "Uitvoeringenmonitor",
     "toggleTheme": "Thema wisselen"
   },
   "navigation": {
@@ -45,6 +55,22 @@
       "running": "Lopende taken: {tasks}",
       "default": "{count} taken: {tasks}"
     }
+  },
+  "executions": {
+    "title": "Workflowuitvoeringen",
+    "subtitle": "Monitor en volg uw workflowuitvoeringen",
+    "noExecutions": "Geen uitvoeringen gevonden",
+    "noExecutionsDescription": "Er zijn nog geen workflowuitvoeringen gestart.",
+    "noExecutionsFiltered": "Geen uitvoeringen met status \"{status}\".",
+    "executionId": "Uitvoerings-ID",
+    "workflowName": "Workflow",
+    "startedAt": "Gestart",
+    "currentStep": "Huidige stap",
+    "duration": "Duur",
+    "currentStep": "Huidige stap",
+    "startedAt": "Gestart",
+    "duration": "Duur",
+    "viewDetails": "Details bekijken"
   },
   "workflowDetail": {
     "backToWorkflows": "Terug naar Workflows",
@@ -91,7 +117,9 @@
     "suspended": "opgeschort",
     "cancelled": "geannuleerd",
     "faulted": "fout",
-    "completed": "voltooid"
+    "completed": "voltooid",
+    "active": "actief",
+    "inactive": "inactief"
   },
   "language": {
     "select": "Taal selecteren",
@@ -106,5 +134,11 @@
     "light": "Licht",
     "dark": "Donker",
     "system": "Systeem"
+  },
+  "api": {
+    "view": {
+      "cards": "Kaarten",
+      "table": "Tabel"
+    }
   }
 }

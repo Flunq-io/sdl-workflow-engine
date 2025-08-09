@@ -15,8 +15,9 @@ import {
   FileText,
   Database
 } from 'lucide-react'
-import { formatRelativeTime, formatAbsoluteTime, formatDatePairCompact } from '@/lib/utils'
+import { formatDatePairCompact } from '@/lib/utils'
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 interface EventTimelineProps {
   events: WorkflowEvent[]
@@ -291,6 +292,7 @@ function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
 }
 
 export function EventTimeline({ events, isLoading, error, locale = 'en' }: EventTimelineProps) {
+  const t = useTranslations()
 
   if (error) {
     return (
@@ -298,14 +300,14 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
             <Activity className="h-5 w-5" />
-            Event Timeline
+            {t('eventTimeline.title')}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">Failed to load events</p>
+              <p className="text-muted-foreground">{t('eventTimeline.failedToLoad')}</p>
               <p className="text-sm text-muted-foreground">{error.message}</p>
             </div>
           </div>
@@ -319,7 +321,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           <Activity className="h-5 w-5" />
-          Event Timeline
+          {t('eventTimeline.title')}
           {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
         </CardTitle>
       </CardHeader>
@@ -328,8 +330,8 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
               <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">No events found</p>
-              <p className="text-sm text-muted-foreground">Events will appear here as the workflow executes</p>
+              <p className="text-muted-foreground">{t('eventTimeline.noEvents')}</p>
+              <p className="text-sm text-muted-foreground">{t('eventTimeline.noEventsDescription')}</p>
             </div>
           </div>
         ) : (
@@ -373,13 +375,13 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                               {requestedEvent.data?.task_type === 'wait' && (
                                 <Clock className="h-4 w-4 text-orange-500" />
                               )}
-                              Task: {taskName}
+                              {t('eventTimeline.task') } {taskName}
                             </h4>
                             <Badge
                               variant={completedEvent ? "default" : "secondary"}
                               className={`text-xs ${completedEvent ? 'bg-green-100 text-green-700 hover:bg-green-200' : ''}`}
                             >
-                              {completedEvent ? "Completed" : "In Progress"}
+                              {completedEvent ? t('eventTimeline.success') : t('status.running')}
                             </Badge>
                             {/* Show wait duration for wait tasks */}
                             {(() => {
@@ -401,7 +403,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 text-xs">
                               <Clock className="h-3 w-3 text-yellow-600" />
-                              <span className="font-medium">Started:</span>
+                              <span className="font-medium">{t('executions.startedAt')}:</span>
                               <span className="cursor-help">
                                 {formatDatePairCompact(requestedEvent.time, locale)}
                               </span>
@@ -409,7 +411,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                             {completedEvent && (
                               <div className="flex items-center gap-2 text-xs">
                                 <CheckCircle className="h-3 w-3 text-green-600" />
-                                <span className="font-medium">Completed:</span>
+                                <span className="font-medium">{t('common.completed')}:</span>
                                 <span className="cursor-help">
                                   {formatDatePairCompact(completedEvent.time, locale)}
                                 </span>
@@ -426,14 +428,14 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                               <>
                                 {requestedInputData && (
                                   <DataDisplay
-                                    title="Task Input"
+                                    title={t('eventTimeline.taskInput')}
                                     data={requestedInputData}
                                     variant="input"
                                   />
                                 )}
                                 {completedOutputData && (
                                   <DataDisplay
-                                    title="Task Output"
+                                    title={t('eventTimeline.taskOutput')}
                                     data={completedOutputData}
                                     variant="output"
                                   />
@@ -488,7 +490,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                             {formatDatePairCompact(event.time, locale)}
                           </span>
                           {event.executionid && (
-                            <span>Execution: {event.executionid.slice(0, 8)}...</span>
+                            <span>{t('executions.executionId')}: {event.executionid.slice(0, 8)}...</span>
                           )}
                         </div>
                       </div>
@@ -497,7 +499,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                     {/* Input/Output Data Display */}
                     {inputData && (
                       <DataDisplay
-                        title={event.type.includes('execution.started') ? 'Workflow Input' : 'Task Input'}
+                        title={event.type.includes('execution.started') ? t('eventTimeline.workflowInput') : t('eventTimeline.taskInput')}
                         data={inputData}
                         variant="input"
                       />
@@ -505,7 +507,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
 
                     {outputData && (
                       <DataDisplay
-                        title={event.type.includes('workflow.completed') ? 'Workflow Output' : 'Task Output'}
+                        title={event.type.includes('workflow.completed') ? t('eventTimeline.workflowOutput') : t('eventTimeline.taskOutput')}
                         data={outputData}
                         variant="output"
                       />
@@ -516,7 +518,7 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                       <div className="mt-2">
                         <details className="group">
                           <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            View event data
+                            {t('eventTimeline.viewEventData')}
                           </summary>
                           <div className="mt-2 p-3 bg-muted rounded-md">
                             <pre className="text-xs overflow-x-auto">

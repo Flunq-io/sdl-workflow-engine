@@ -94,15 +94,15 @@ stream, err := factory.NewEventStream(factory.EventStreamDeps{
 
 ### **Step 1: Implement the EventStore Interface**
 
-Create a new package under `worker/pkg/eventstore/yourbackend/`:
+Create a new package under `shared/pkg/eventstreaming/yourbackend/`:
 
 ```go
 package yourbackend
 
 import (
     "context"
-    "github.com/flunq-io/events/pkg/cloudevents"
-    "github.com/flunq-io/worker/pkg/eventstore"
+    "github.com/flunq-io/shared/pkg/cloudevents"
+    "github.com/flunq-io/shared/pkg/interfaces"
 )
 
 type YourEventStore struct {
@@ -205,7 +205,10 @@ Update your service's main.go to use the new backend:
 
 ```go
 // main.go
-import "github.com/flunq-io/worker/pkg/eventstore/yourbackend"
+import (
+    yourbackend "github.com/flunq-io/shared/pkg/eventstreaming/yourbackend"
+    "github.com/flunq-io/shared/pkg/factory"
+)
 
 func main() {
     // Initialize your EventStore implementation
@@ -340,7 +343,7 @@ for {
 - `io.flunq.state.exited`
 - `io.flunq.state.error`
 
-## 🛡️ **Temporal-Level Resilience Features**
+## 🛡️ **Enterprise-Grade Resilience Features**
 
 ### **Event Sourcing Pattern**
 - **Complete Event History**: Every workflow event is permanently stored
@@ -466,7 +469,7 @@ package main
 import (
     "context"
     "log"
-    "github.com/flunq-io/worker/pkg/eventstore/redis"
+    redisstream "github.com/flunq-io/shared/pkg/eventstreaming"
 )
 
 func main() {
@@ -515,11 +518,11 @@ for event := range eventCh {
 
 ## 🎯 **Key Benefits**
 
-- **🛡️ Temporal-Level Resilience**: Complete event history, crash recovery, deterministic replay
+- **🛡️ Enterprise-Grade Resilience**: Complete event history, crash recovery, deterministic replay
 - **🔌 Pluggable Backends**: Easy switching between Redis, Kafka, RabbitMQ via configuration
 - **⚡ High Performance**: Direct backend access, no HTTP overhead
 - **📈 Horizontal Scaling**: Consumer groups for load balancing across multiple workers
 - **🔍 Complete Auditability**: Every workflow event permanently stored and queryable
 - **🚀 Simple Integration**: Import as library, no separate service to deploy
 
-The EventStore ensures ALL services stay synchronized through events, provides Temporal-level resilience, and offers complete flexibility for future backend changes.
+The EventStore ensures ALL services stay synchronized through events, provides enterprise-grade resilience, and offers complete flexibility for future backend changes.

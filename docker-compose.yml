@@ -47,7 +47,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - WORKER_ID=worker-1
-      - CONCURRENCY=10
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-4}
       - REDIS_URL=redis:6379
       - EXECUTOR_URL=http://executor:8083
       - LOG_LEVEL=info
@@ -68,6 +68,7 @@ services:
       - "8083:8083"
     environment:
       - PORT=8083
+      - EXECUTOR_CONCURRENCY=${EXECUTOR_CONCURRENCY:-4}
       - REDIS_URL=redis:6379
       - DEFAULT_TIMEOUT=30s
       - MAX_RETRIES=3

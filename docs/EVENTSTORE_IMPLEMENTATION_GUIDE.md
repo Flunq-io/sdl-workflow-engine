@@ -62,7 +62,7 @@ type Logger interface {
 
 ### Step 1: Create Package Structure
 
-Create a new package under `worker/pkg/eventstore/yourbackend/`:
+Create a new package under `shared/pkg/eventstreaming/yourbackend/`:
 
 ```
 shared/pkg/eventstreaming/yourbackend/

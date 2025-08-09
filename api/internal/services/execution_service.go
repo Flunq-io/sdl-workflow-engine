@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -48,6 +49,19 @@ func (s *ExecutionService) ListExecutions(ctx context.Context, params *models.Ex
 		s.logger.Error("Failed to list executions from repository", zap.Error(err))
 		return nil, 0, fmt.Errorf("failed to list executions: %w", err)
 	}
+
+	// Sort by start date (newest first); if StartedAt is zero, fallback to CompletedAt
+	sort.Slice(executions, func(i, j int) bool {
+		si := executions[i].StartedAt
+		sj := executions[j].StartedAt
+		if si.IsZero() && executions[i].CompletedAt != nil {
+			si = *executions[i].CompletedAt
+		}
+		if sj.IsZero() && executions[j].CompletedAt != nil {
+			sj = *executions[j].CompletedAt
+		}
+		return si.After(sj)
+	})
 
 	return executions, total, nil
 }

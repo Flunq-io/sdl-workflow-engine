@@ -12,7 +12,7 @@ Modern, minimalistic web dashboard for the Flunq.io workflow engine. Built with 
 - **Internationalization** - Support for 6 languages (EN, FR, DE, ES, ZH, NL)
 - **Dark/Light Mode** - Beautiful theme switching with system preference detection
 - **Responsive Design** - Works perfectly on desktop, tablet, and mobile
-- **Temporal-like Interface** - Familiar, professional workflow monitoring experience
+- **Enterprise-grade Interface** - Familiar, professional workflow monitoring experience
 
 ## 🏗️ Architecture
 
