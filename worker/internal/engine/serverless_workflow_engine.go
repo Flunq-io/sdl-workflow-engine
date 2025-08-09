@@ -223,6 +223,9 @@ func (e *ServerlessWorkflowEngine) ProcessEvent(ctx context.Context, state *gen.
 		return e.processTaskRequestedEvent(state, event)
 	case "io.flunq.task.completed":
 		return e.processTaskCompletedEvent(state, event)
+	case "io.flunq.timer.fired":
+		// Treat timer firing as completion of the wait task
+		return e.processTaskCompletedEvent(state, event)
 	case "io.flunq.workflow.step.completed":
 		return e.processStepCompletedEvent(state, event)
 	case "io.flunq.workflow.completed":
@@ -1112,64 +1115,31 @@ func (e *ServerlessWorkflowEngine) scheduleWaitCompletionEvent(ctx context.Conte
 		executionID = state.Context.ExecutionId
 	}
 
-	// Create the wait completion event that will be published after the duration
-	completionEvent := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("wait-completed-%s-%d", task.Name, time.Now().Unix()),
+	// Instead of local sleep, publish a timer.scheduled event and let timer-service fire it
+	resumeAt := time.Now().Add(duration)
+	scheduled := &cloudevents.CloudEvent{
+		ID:          fmt.Sprintf("timer-scheduled-%s-%d", task.Name, time.Now().Unix()),
 		Source:      "workflow-engine",
 		SpecVersion: "1.0",
-		Type:        "io.flunq.task.completed",
+		Type:        "io.flunq.timer.scheduled",
 		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: executionID,
 		TaskID:      task.Name,
-		Time:        time.Now().Add(duration), // Set time to when it should complete
+		Time:        time.Now(),
 		Data: map[string]interface{}{
-			"task_name": task.Name,
-			"task_type": "wait",
-			"data": map[string]interface{}{
-				"input": task.Input.AsMap(),
-				"output": map[string]interface{}{
-					"waited_duration": duration.String(),
-					"completed_at":    time.Now().Add(duration).Format(time.RFC3339),
-				},
-				"metadata": map[string]interface{}{
-					"started_at":   time.Now().Format(time.RFC3339),
-					"completed_at": time.Now().Add(duration).Format(time.RFC3339),
-					"duration_ms":  duration.Milliseconds(),
-					"task_type":    "wait",
-					"status":       "completed",
-				},
-			},
+			"tenant_id":    tenantID,
+			"workflow_id":  state.WorkflowId,
+			"execution_id": executionID,
+			"task_id":      task.Name,
+			"task_name":    task.Name,
+			"duration_ms":  duration.Milliseconds(),
+			"fire_at":      resumeAt.Format(time.RFC3339),
 		},
 	}
-
-	// Use a simple goroutine with timer for now - this is the minimal event-driven approach
-	// In a production system, this would use Redis delayed jobs, message TTL, or similar
-	go func() {
-		timer := time.NewTimer(duration)
-		defer timer.Stop()
-
-		select {
-		case <-timer.C:
-			// Timer expired - publish the completion event
-			if err := e.eventStream.Publish(context.Background(), completionEvent); err != nil {
-				e.logger.Error("Failed to publish wait completion event",
-					"workflow_id", state.WorkflowId,
-					"task_name", task.Name,
-					"error", err)
-			} else {
-				e.logger.Info("Published wait completion event",
-					"workflow_id", state.WorkflowId,
-					"task_name", task.Name,
-					"duration", duration)
-			}
-		case <-ctx.Done():
-			// Context cancelled - don't publish the event
-			e.logger.Info("Wait task cancelled due to context cancellation",
-				"workflow_id", state.WorkflowId,
-				"task_name", task.Name)
-		}
-	}()
+	if err := e.eventStream.Publish(ctx, scheduled); err != nil {
+		return fmt.Errorf("failed to publish timer.scheduled: %w", err)
+	}
 
 	e.logger.Info("Scheduled wait completion event",
 		"workflow_id", state.WorkflowId,

@@ -86,6 +86,7 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 			"io.flunq.workflow.created",
 			"io.flunq.execution.started",
 			"io.flunq.task.completed",
+			"io.flunq.timer.fired", // Resume waits
 		},
 		WorkflowIDs:   []string{}, // Subscribe to all workflows
 		ConsumerGroup: fmt.Sprintf("worker-service-%d", time.Now().Unix()),
@@ -422,19 +423,6 @@ func (p *WorkflowProcessor) fetchEventHistoryForExecution(ctx context.Context, w
 
 // NOTE: handleWorkflowCreated method removed - workflow creation is handled by API service only
 
-// getWorkflowDefinition gets the workflow definition from database
-func (p *WorkflowProcessor) getWorkflowDefinition(ctx context.Context, workflowID string) (*gen.WorkflowDefinition, error) {
-	definition, err := p.database.GetWorkflowDefinition(ctx, workflowID)
-	if err != nil {
-		p.logger.Error("Failed to get workflow definition",
-			"workflow_id", workflowID,
-			"error", err)
-		return nil, err
-	}
-
-	return definition, nil
-}
-
 // getWorkflowDefinitionWithTenant gets the workflow definition with tenant context
 func (p *WorkflowProcessor) getWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*gen.WorkflowDefinition, error) {
 	// Use the tenant-aware method for efficient lookup
@@ -548,17 +536,6 @@ func (p *WorkflowProcessor) executeWaitTaskLocally(ctx context.Context, task *ge
 	return p.publishWaitTaskInitiatedEvent(ctx, task, taskData, state)
 }
 
-// executeLocalTask is deprecated - all tasks are now sent to executor service
-// This function is kept for reference but should not be used
-func (p *WorkflowProcessor) executeLocalTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
-	p.logger.Warn("executeLocalTask is deprecated - all tasks should go through executor service",
-		"task_name", task.Name,
-		"task_type", task.TaskType)
-
-	// Redirect to executor service
-	return p.executeTask(ctx, task, state)
-}
-
 // publishTaskRequestedEvent publishes a TaskRequested event for external execution
 func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
 	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
@@ -649,18 +626,6 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		"workflow_id", state.WorkflowId,
 		"event_id", event.ID)
 
-	return nil
-}
-
-// publishTaskCompletedEvent is deprecated - task.completed events are now published by executor service
-// This function is kept for reference but should not be used
-func (p *WorkflowProcessor) publishTaskCompletedEvent(ctx context.Context, taskID, taskName string, taskData *gen.TaskData, state *gen.WorkflowState, startTime time.Time, duration time.Duration) error {
-	p.logger.Warn("publishTaskCompletedEvent is deprecated - task.completed events should come from executor service",
-		"task_id", taskID,
-		"task_name", taskName,
-		"workflow_id", state.WorkflowId)
-
-	// Do not publish - executor service handles this
 	return nil
 }
 
@@ -915,11 +880,6 @@ func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskI
 		return fmt.Errorf("failed to store task scheduled event: %w", err)
 	}
 
-	p.logger.Info("Task scheduled",
-		"task_id", taskID,
-		"task_name", task.Name,
-		"workflow_id", state.WorkflowId)
-
 	return nil
 }
 
@@ -1028,7 +988,7 @@ func (p *WorkflowProcessor) publishWaitTaskInitiatedEvent(ctx context.Context, t
 		ID:          fmt.Sprintf("wait-initiated-%s-%d", task.Name, time.Now().Unix()),
 		Source:      "worker-service",
 		SpecVersion: "1.0",
-		Type:        "io.flunq.task.completed", // Use completed type since wait is "completed" (initiated)
+		Type:        "io.flunq.wait.initiated", // Trace-only; actual scheduling emitted by engine as io.flunq.timer.scheduled
 		TenantID:    tenantID,
 		WorkflowID:  state.WorkflowId,
 		ExecutionID: executionID,

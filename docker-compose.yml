@@ -98,6 +98,20 @@ services:
       api:
         condition: service_healthy
 
+  # Timer Service
+  timer:
+    build:
+      context: ./timer
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis:6379
+      - EVENT_STREAM_TYPE=redis
+      - TIMER_LOOKAHEAD=100ms
+      - TIMER_MAX_SLEEP=1s
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   redis_data:
 
