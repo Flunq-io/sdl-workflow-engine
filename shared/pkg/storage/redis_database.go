@@ -283,6 +283,13 @@ func (r *RedisDatabase) CreateExecution(ctx context.Context, execution *interfac
 		execution.StartedAt = time.Now()
 	}
 
+	// Do not allow CompletedAt on create unless status is terminal
+	if execution.Status != interfaces.WorkflowStatusCompleted &&
+		execution.Status != interfaces.WorkflowStatusFailed &&
+		execution.Status != interfaces.WorkflowStatusCancelled {
+		execution.CompletedAt = nil
+	}
+
 	data, err := json.Marshal(execution)
 	if err != nil {
 		return fmt.Errorf("failed to marshal execution: %w", err)
@@ -406,6 +413,38 @@ func (r *RedisDatabase) UpdateExecution(ctx context.Context, executionID string,
 
 	// Ensure ID consistency
 	execution.ID = executionID
+
+	// Debug log incoming update before normalization
+	r.logger.Info("UpdateExecution incoming",
+		"execution_id", executionID,
+		"status", execution.Status,
+		"incoming_started_at", execution.StartedAt,
+		"incoming_completed_at", execution.CompletedAt,
+	)
+
+	// Defensive normalization to prevent mid-run regressions
+	// 1) Preserve StartedAt from existing if incoming is zero
+	// 2) Never store CompletedAt for non-terminal statuses
+	// 3) Ensure StartedAt is never zero in storage
+	var existing interfaces.WorkflowExecution
+	existingData, getErr := r.client.Get(ctx, key).Result()
+	if getErr == nil {
+		if err := json.Unmarshal([]byte(existingData), &existing); err == nil {
+			if execution.StartedAt.IsZero() && !existing.StartedAt.IsZero() {
+				execution.StartedAt = existing.StartedAt
+			}
+		}
+	}
+
+	// If status is non-terminal, always clear CompletedAt
+	if execution.Status == interfaces.WorkflowStatusPending || execution.Status == interfaces.WorkflowStatusRunning {
+		execution.CompletedAt = nil
+	}
+
+	// If StartedAt still zero, set to now to avoid zero-time in DB
+	if execution.StartedAt.IsZero() {
+		execution.StartedAt = time.Now()
+	}
 
 	data, err := json.Marshal(execution)
 	if err != nil {

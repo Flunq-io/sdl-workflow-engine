@@ -11,7 +11,7 @@ import {
   CheckCircle,
   Play,
   Square,
-  Zap,
+
   FileText,
   Database
 } from 'lucide-react'
@@ -61,17 +61,26 @@ function formatEventType(eventType: string) {
 }
 
 function extractTaskName(event: WorkflowEvent): string | null {
-  if (!event.data) return null
+  const d = event.data as Record<string, unknown> | undefined
+  if (!d) return null
 
   // Try different ways to extract task name from event data
-  if (event.data.task_name) return event.data.task_name
-  if (event.data.taskName) return event.data.taskName
+  const tn = (d as Record<string, unknown>)['task_name']
+  if (typeof tn === 'string') return tn
+  const tName = (d as Record<string, unknown>)['taskName']
+  if (typeof tName === 'string') return tName
 
   // For task events, also check nested data
   if (event.type.includes('task.')) {
-    if (event.data.input?.task_name) return event.data.input.task_name
-    if (event.data.output?.task_name) return event.data.output.task_name
-    if (event.data.data?.task_name) return event.data.data.task_name
+    const input = d['input'] as Record<string, unknown> | undefined
+    const output = d['output'] as Record<string, unknown> | undefined
+    const data = d['data'] as Record<string, unknown> | undefined
+    const inName = input && typeof input['task_name'] === 'string' ? (input['task_name'] as string) : null
+    if (inName) return inName
+    const outName = output && typeof output['task_name'] === 'string' ? (output['task_name'] as string) : null
+    if (outName) return outName
+    const dataName = data && typeof data['task_name'] === 'string' ? (data['task_name'] as string) : null
+    if (dataName) return dataName
   }
 
   return null
@@ -101,26 +110,28 @@ function findTaskPair(event: WorkflowEvent, events: WorkflowEvent[]): WorkflowEv
   return null
 }
 
-function extractInputData(event: WorkflowEvent): Record<string, any> | null {
+function extractInputData(event: WorkflowEvent): Record<string, JsonValue> | null {
   if (!event.data) return null
 
   // For workflow execution started events
   if (event.type.includes('execution.started') && event.data.input) {
-    return event.data.input
+    return event.data.input as Record<string, JsonValue>
   }
 
   // For task events - try to get meaningful business data instead of internal metadata
   if (event.type.includes('task.requested')) {
     // For set tasks, the input is usually the workflow context/variables available to the task
     // Look for actual business data in config parameters
-    if (event.data.config?.parameters) {
-      const params = event.data.config.parameters
+    const cfg = (event.data as Record<string, unknown>)['config'] as Record<string, unknown> | undefined
+    const params = cfg?.['parameters'] as Record<string, JsonValue> | undefined
+    if (params) {
       // Filter out internal metadata and show only business data
-      const businessData: Record<string, any> = {}
+      const businessData: Record<string, JsonValue> = {}
 
       // For set tasks, show what variables are being set
-      if (params.set_data) {
-        return { variables_to_set: params.set_data }
+      if (Object.prototype.hasOwnProperty.call(params, 'set_data')) {
+        const v = (params as Record<string, JsonValue>)['set_data']
+        return { variables_to_set: v as JsonValue }
       }
 
       // For other task types, show the parameters
@@ -136,19 +147,19 @@ function extractInputData(event: WorkflowEvent): Record<string, any> | null {
     }
 
     // Fallback to original input data
-    if (event.data.input_data) return event.data.input_data
-    if (event.data.input) return event.data.input
+    if (Object.prototype.hasOwnProperty.call(event.data as Record<string, unknown>, 'input_data')) return (event.data as Record<string, JsonValue>)['input_data'] as Record<string, JsonValue>
+    if (event.data.input) return event.data.input as Record<string, JsonValue>
   }
 
   return null
 }
 
-function extractOutputData(event: WorkflowEvent): Record<string, any> | null {
+function extractOutputData(event: WorkflowEvent): Record<string, JsonValue> | null {
   if (!event.data) return null
 
   // For workflow completion events
   if (event.type.includes('workflow.completed') && event.data.output) {
-    return event.data.output
+    return event.data.output as Record<string, JsonValue>
   }
 
   // For task completion events - extract meaningful business data
@@ -156,25 +167,29 @@ function extractOutputData(event: WorkflowEvent): Record<string, any> | null {
     // Try to get the actual values that were set/produced by the task
 
     // Check for set_data in the nested output (this contains the actual values set)
-    if (event.data.data?.output?.set_data) {
-      return event.data.data.output.set_data
+    if (Object.prototype.hasOwnProperty.call((event.data as Record<string, unknown>)?.['data'] as Record<string, unknown> || {}, 'output')) {
+      const out = ((event.data as Record<string, unknown>)['data'] as Record<string, unknown>)['output'] as Record<string, unknown>
+      if (Object.prototype.hasOwnProperty.call(out || {}, 'set_data')) {
+        return (out as Record<string, JsonValue>)['set_data'] as Record<string, JsonValue>
+      }
     }
 
     // Check for set_data in direct output
-    if (event.data.output?.set_data) {
-      return event.data.output.set_data
+    const out2 = (event.data as Record<string, unknown>)['output'] as Record<string, unknown> | undefined
+    if (out2 && Object.prototype.hasOwnProperty.call(out2, 'set_data')) {
+      return (out2 as Record<string, JsonValue>)['set_data'] as Record<string, JsonValue>
     }
 
     // For wait tasks, show the wait completion data
     if (event.data.output && Object.keys(event.data.output).some(key =>
       key.includes('duration') || key.includes('waited') || key.includes('completed_at')
     )) {
-      return event.data.output
+      return event.data.output as Record<string, JsonValue>
     }
 
     // Final fallbacks
-    if (event.data.output_data) return event.data.output_data
-    if (event.data.output) return event.data.output
+    if (Object.prototype.hasOwnProperty.call(event.data as Record<string, unknown>, 'output_data')) return (event.data as Record<string, JsonValue>)['output_data'] as Record<string, JsonValue>
+    if (event.data.output) return event.data.output as Record<string, JsonValue>
   }
 
   return null
@@ -208,9 +223,11 @@ function getEventTitle(event: WorkflowEvent): { title: string; subtitle?: string
   return { title: baseType }
 }
 
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+
 interface DataDisplayProps {
   title: string
-  data: Record<string, any>
+  data: Record<string, JsonValue>
   variant?: 'input' | 'output' | 'default'
 }
 
@@ -365,11 +382,19 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                               {completedEvent ? "Completed" : "In Progress"}
                             </Badge>
                             {/* Show wait duration for wait tasks */}
-                            {requestedEvent.data?.task_type === 'wait' && requestedEvent.data?.config?.parameters?.duration && (
-                              <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
-                                ⏱️ {requestedEvent.data.config.parameters.duration}
-                              </Badge>
-                            )}
+                            {(() => {
+                              const rd = requestedEvent.data as Record<string, unknown> | undefined
+                              const cfg = rd?.['config'] as Record<string, unknown> | undefined
+                              const dur = (cfg?.['parameters'] as Record<string, unknown> | undefined)?.['duration']
+                              if (rd?.['task_type'] === 'wait' && typeof dur !== 'undefined') {
+                                return (
+                                  <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
+                                    ⏱️ {String(dur)}
+                                  </Badge>
+                                )
+                              }
+                              return null
+                            })()}
                           </div>
 
                           {/* Show both events in the card */}

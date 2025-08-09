@@ -12,8 +12,7 @@ import (
 
 	"github.com/flunq-io/executor/internal/executor"
 	"github.com/flunq-io/executor/internal/processor"
-	"github.com/flunq-io/shared/pkg/eventstreaming"
-	"github.com/flunq-io/shared/pkg/interfaces"
+	"github.com/flunq-io/shared/pkg/factory"
 )
 
 // LoggerAdapter adapts zap.Logger to the shared eventstreaming.Logger interface
@@ -72,9 +71,17 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Create logger adapter for shared Redis implementation
+	// Create logger adapter and select EventStream via factory
 	loggerAdapter := &LoggerAdapter{logger: zapLogger}
-	var eventStream interfaces.EventStream = eventstreaming.NewRedisEventStream(redisClient, loggerAdapter) // Publishing and subscribing
+	eventBackend := getEnv("EVENT_STREAM_TYPE", "redis")
+	eventStream, err := factory.NewEventStream(factory.EventStreamDeps{
+		Backend:     eventBackend,
+		RedisClient: redisClient,
+		Logger:      loggerAdapter,
+	})
+	if err != nil {
+		zapLogger.Fatal("Failed to create EventStream", zap.Error(err))
+	}
 
 	// Initialize task executors
 	taskExecutors := map[string]executor.TaskExecutor{

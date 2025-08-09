@@ -5,16 +5,12 @@ import { createTenantApiClient } from '@/lib/api'
 import { ExecutionList } from '@/components/execution-list'
 import { ClientOnly } from '@/components/client-only'
 import { Loader2 } from 'lucide-react'
+import { useParams } from 'next/navigation'
 
-interface PageProps {
-  params: {
-    tenant: string;
-    locale: string;
-  };
-}
-
-export default function TenantDashboard({ params }: PageProps) {
-  const { tenant, locale } = params;
+export default function TenantDashboard() {
+  const params = useParams<{ tenant: string; locale: string }>()
+  const tenant = String(params.tenant)
+  const locale = String(params.locale)
 
   // Create tenant-aware API client
   const apiClient = createTenantApiClient(tenant);

@@ -7,17 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  Clock,
   Calendar,
-  Play,
   Pause,
-  Square,
-  AlertCircle,
   CheckCircle,
-  Timer,
   Eye,
-  Zap,
-  ArrowRight,
   LayoutGrid,
   Table
 } from 'lucide-react'
@@ -29,15 +22,13 @@ interface WorkflowListProps {
   locale?: string
 }
 
-function extractTaskNames(definition: Record<string, any>): string[] {
-  if (!definition || !definition.do || !Array.isArray(definition.do)) {
-    return []
-  }
+type DoStep = Record<string, unknown>
 
-  return definition.do.map((step: any) => {
-    const stepName = Object.keys(step)[0]
-    return stepName
-  }).filter(Boolean)
+function extractTaskNames(definition: { do?: DoStep[] } | null | undefined): string[] {
+  if (!definition || !Array.isArray(definition.do)) return []
+  return definition.do
+    .map((step) => Object.keys(step || {})[0])
+    .filter((name): name is string => Boolean(name))
 }
 
 function getTaskSummary(taskNames: string[]): string {
@@ -67,7 +58,7 @@ function getStateVariant(state: Workflow['state']) {
   }
 }
 
-export function WorkflowList({ workflows, tenant = 'acme-inc', locale = 'en' }: WorkflowListProps) {
+export function WorkflowList({ workflows, tenant = '', locale = 'en' }: WorkflowListProps) {
   const [filter, setFilter] = useState<'all' | Workflow['state']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
 
@@ -170,7 +161,7 @@ export function WorkflowList({ workflows, tenant = 'acme-inc', locale = 'en' }: 
               <CardContent className="space-y-4">
                 {/* Task Summary */}
                 <div className="flex items-center gap-2 text-sm">
-                  <Zap className="h-4 w-4 text-muted-foreground" />
+                  <LayoutGrid className="h-4 w-4 text-muted-foreground" />
                   <span className="text-muted-foreground">{taskSummary}</span>
                 </div>
 

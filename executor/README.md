@@ -112,7 +112,6 @@ Injects data/variables into the workflow context.
 
 ### Prerequisites
 - Redis running on `localhost:6379`
-- Event Store service running on `localhost:8081`
 
 ### Start the Service
 ```bash
@@ -121,7 +120,7 @@ go run cmd/server/main.go
 ```
 
 ### Environment Variables
-- `EVENTS_URL`: Event Store URL (default: `http://localhost:8081`)
+- `EVENT_STREAM_TYPE`: Event backend (default: `redis`)
 - `REDIS_URL`: Redis URL (default: `localhost:6379`)
 - `REDIS_PASSWORD`: Redis password (default: empty)
 - `LOG_LEVEL`: Log level (default: `info`)

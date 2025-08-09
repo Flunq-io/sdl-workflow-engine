@@ -6,21 +6,17 @@ import { ExecutionList } from '@/components/execution-list'
 import { ClientOnly } from '@/components/client-only'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useEffect } from 'react'
 
-interface PageProps {
-  params: {
-    tenant: string;
-    locale: string;
-  };
-}
+import { useParams } from 'next/navigation'
 
-export default function ExecutionsPage({ params }: PageProps) {
-  const { tenant, locale } = params;
+export default function ExecutionsPage() {
+  const params = useParams<{ tenant: string; locale: string }>()
+  const tenant = String(params.tenant)
+  const locale = String(params.locale)
 
   // Create tenant-aware API client
   const apiClient = createTenantApiClient(tenant);
-  
+
   const { data: executions, isLoading, error, refetch } = useQuery({
     queryKey: ['executions', tenant],
     queryFn: () => apiClient.getExecutions({ limit: 50 }),

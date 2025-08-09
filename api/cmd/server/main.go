@@ -17,9 +17,8 @@ import (
 	"github.com/flunq-io/api/internal/middleware"
 	"github.com/flunq-io/api/internal/models"
 	"github.com/flunq-io/api/internal/services"
-	"github.com/flunq-io/shared/pkg/eventstreaming"
+	"github.com/flunq-io/shared/pkg/factory"
 	"github.com/flunq-io/shared/pkg/interfaces"
-	"github.com/flunq-io/shared/pkg/storage"
 )
 
 // LoggerAdapter adapts zap.Logger to eventstore.Logger interface
@@ -239,18 +238,35 @@ func main() {
 		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 
-	// Initialize shared event streaming
-	eventStreamLogger := &EventStreamLoggerAdapter{logger: logger}
-	eventStream := eventstreaming.NewRedisEventStream(redisClient, eventStreamLogger)
-
-	// Initialize shared database
-	databaseLogger := &DatabaseLoggerAdapter{logger: logger}
-	database := storage.NewRedisDatabase(redisClient, databaseLogger, &interfaces.DatabaseConfig{
-		Type:       "redis",
-		Host:       getEnv("REDIS_HOST", "localhost"),
-		Port:       6379,
-		TenantMode: true,
+	// Select EventStream implementation by config via shared factory
+	eventBackend := getEnv("EVENT_STREAM_TYPE", "redis")
+	eventStream, err := factory.NewEventStream(factory.EventStreamDeps{
+		Backend:     eventBackend,
+		RedisClient: redisClient,
+		Logger:      &EventStreamLoggerAdapter{logger: logger},
 	})
+	if err != nil {
+		logger.Fatal("Failed to create EventStream", zap.Error(err))
+	}
+
+	// Select Database implementation by config via shared factory
+	dbBackend := getEnv("DB_TYPE", "redis")
+	database, err := factory.NewDatabase(factory.DatabaseDeps{
+		Backend:     dbBackend,
+		RedisClient: redisClient,
+		Logger:      &DatabaseLoggerAdapter{logger: logger},
+		Config: &interfaces.DatabaseConfig{
+			Type:       dbBackend,
+			Host:       getEnv("REDIS_HOST", "localhost"),
+			Port:       6379,
+			TenantMode: true,
+		},
+	})
+	if err != nil {
+		logger.Fatal("Failed to create Database", zap.Error(err))
+	}
+
+	// eventStream and database already selected above via config
 
 	// Initialize execution repository using shared database
 	executionRepo := adapters.NewSharedExecutionRepository(database)

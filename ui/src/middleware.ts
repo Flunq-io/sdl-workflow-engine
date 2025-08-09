@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { locales } from './i18n'
 
-// List of valid tenants (you can make this dynamic by fetching from your API)
-const VALID_TENANTS = ['acme-inc', 'demo-tenant', 'test-tenant']
+// Default tenant and locale can be customized via env; do not hardcode tenants
+const DEFAULT_TENANT = process.env.NEXT_PUBLIC_DEFAULT_TENANT || 'tenant'
+const DEFAULT_LOCALE = process.env.NEXT_PUBLIC_DEFAULT_LOCALE || 'en'
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -20,7 +21,7 @@ export function middleware(request: NextRequest) {
 
   // Handle root path - redirect to default tenant/locale
   if (pathname === '/') {
-    return NextResponse.redirect(new URL('/acme-inc/en', request.url))
+    return NextResponse.redirect(new URL(`/${DEFAULT_TENANT}/${DEFAULT_LOCALE}`, request.url))
   }
 
   // Parse the pathname to extract tenant and locale
@@ -28,22 +29,17 @@ export function middleware(request: NextRequest) {
 
   if (pathSegments.length < 2) {
     // If no tenant/locale specified, redirect to default
-    return NextResponse.redirect(new URL('/acme-inc/en', request.url))
+    return NextResponse.redirect(new URL(`/${DEFAULT_TENANT}/${DEFAULT_LOCALE}`, request.url))
   }
 
   const [tenant, locale] = pathSegments
 
-  // Validate tenant
-  if (!VALID_TENANTS.includes(tenant)) {
-    // Redirect to default tenant if invalid
-    const newPath = pathname.replace(`/${tenant}`, '/acme-inc')
-    return NextResponse.redirect(new URL(newPath, request.url))
-  }
+  // Do not enforce a fixed tenant allowlist here — allow any tenant string
 
-  // Validate locale
-  if (!locales.includes(locale as any)) {
+  // Validate locale only
+  if (!(locales as readonly string[]).includes(locale)) {
     // Redirect to default locale if invalid
-    const newPath = pathname.replace(`/${tenant}/${locale}`, `/${tenant}/en`)
+    const newPath = pathname.replace(`/${tenant}/${locale}`, `/${tenant}/${DEFAULT_LOCALE}`)
     return NextResponse.redirect(new URL(newPath, request.url))
   }
 

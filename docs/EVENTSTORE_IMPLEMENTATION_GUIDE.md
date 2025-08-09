@@ -4,18 +4,18 @@ This guide shows you how to implement new EventStore backends for the flunq.io w
 
 ## 🎯 Overview
 
-The EventStore interface provides **Temporal-level resilience** with **pluggable backends**. You can easily add support for new event streaming systems like Kafka, RabbitMQ, PostgreSQL, or any other backend.
+The EventStore interface provides **High-level resilience** with **pluggable backends**. You can easily add support for new event streaming systems like Kafka, RabbitMQ, PostgreSQL, or any other backend.
 
 ## 🔧 EventStore Interface
 
 All implementations must satisfy this interface:
 
 ```go
-package eventstore
+package eventstreaming
 
 import (
     "context"
-    "github.com/flunq-io/events/pkg/cloudevents"
+    "github.com/flunq-io/shared/pkg/cloudevents"
 )
 
 type EventStore interface {
@@ -65,11 +65,11 @@ type Logger interface {
 Create a new package under `worker/pkg/eventstore/yourbackend/`:
 
 ```
-worker/pkg/eventstore/yourbackend/
-├── yourbackend_store.go      # Main implementation
-├── config.go                 # Configuration structs
-├── serialization.go          # CloudEvent serialization
-└── yourbackend_store_test.go # Unit tests
+shared/pkg/eventstreaming/yourbackend/
+├── yourbackend_stream.go      # Main implementation
+├── config.go                  # Configuration structs
+├── serialization.go           # CloudEvent serialization
+└── yourbackend_stream_test.go # Unit tests
 ```
 
 ### Step 2: Implement the EventStore Interface
@@ -82,31 +82,22 @@ import (
     "context"
     "fmt"
     "time"
-    "github.com/flunq-io/events/pkg/cloudevents"
-    "github.com/flunq-io/worker/pkg/eventstore"
+    "github.com/flunq-io/shared/pkg/cloudevents"
+    "github.com/flunq-io/shared/pkg/interfaces"
 )
 
 type YourEventStore struct {
     client YourBackendClient
-    logger eventstore.Logger
+    logger interfaces.Logger
     config *Config
 }
 
-func NewYourEventStore(connectionString string, logger eventstore.Logger) (eventstore.EventStore, error) {
-    config, err := parseConnectionString(connectionString)
-    if err != nil {
-        return nil, fmt.Errorf("invalid connection string: %w", err)
-    }
-
-    client, err := NewYourBackendClient(config)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create client: %w", err)
-    }
-
+func NewYourEventStream(logger interfaces.Logger) (interfaces.EventStream, error) {
+    // TODO: parse config from env or passed Config
     return &YourEventStore{
-        client: client,
+        // client: init here
         logger: logger,
-        config: config,
+        // config: cfg,
     }, nil
 }
 
@@ -145,7 +136,7 @@ func (y *YourEventStore) Publish(ctx context.Context, stream string, event *clou
 ### Step 4: Implement Event Subscription
 
 ```go
-func (y *YourEventStore) Subscribe(ctx context.Context, config eventstore.SubscriptionConfig) (<-chan *cloudevents.CloudEvent, <-chan error, error) {
+func (y *YourEventStore) Subscribe(ctx context.Context, config interfaces.StreamFilters) (interfaces.StreamSubscription, error) {
     eventCh := make(chan *cloudevents.CloudEvent, 100)
     errorCh := make(chan error, 10)
 
@@ -375,4 +366,4 @@ type Config struct {
 5. **History Replay**: Read complete event history from any point
 6. **Error Handling**: Graceful error handling with retries and backoff
 
-Your implementation will provide **Temporal-level resilience** with the flexibility to use any backend that meets your performance and operational requirements.
+Your implementation will provide **High-level resilience** with the flexibility to use any backend that meets your performance and operational requirements.

@@ -40,19 +40,23 @@ export interface ButtonProps
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, children, ...props }, ref) => {
-    if (asChild) {
-      // For asChild, we expect children to be a single React element
-      return React.cloneElement(children as React.ReactElement, {
-        className: cn(buttonVariants({ variant, size, className })),
-        ref,
-        ...props,
+    if (asChild && React.isValidElement(children)) {
+      type ChildProps = React.ComponentProps<'a'> & React.ComponentProps<'button'> & { className?: string }
+      const child = children as React.ReactElement<ChildProps>
+      const mergedClassName = cn(
+        buttonVariants({ variant, size, className }),
+        child.props?.className
+      )
+      return React.cloneElement(child, {
+        ...(props as unknown as ChildProps),
+        className: mergedClassName,
       })
     }
 
     return (
       <button
         className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
+        ref={ref as React.Ref<HTMLButtonElement>}
         {...props}
       >
         {children}

@@ -6,7 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // Robust date parsing supporting ISO strings, numeric timestamps (ms or s), and Date objects
-function parseDateInput(date: Date | string | number): Date | null {
+function parseDateInput(date: Date | string | number | null | undefined): Date | null {
   if (date instanceof Date) return isNaN(date.getTime()) ? null : date
   if (typeof date === 'number') {
     const d = new Date(date)
@@ -48,7 +48,7 @@ export function formatDurationHMS(ms: number): string {
   return `${hh}:${mm}:${ss}`
 }
 
-export function isDisplayableDate(date: Date | string | number, minYear = 1970): boolean {
+export function isDisplayableDate(date: Date | string | number | null | undefined, minYear = 1970): boolean {
   const d = parseDateInput(date) || new Date('0001-01-01T00:00:00Z')
   if (!(d instanceof Date) || isNaN(d.getTime())) return false
   if (d.getFullYear() < minYear) return false
@@ -56,14 +56,14 @@ export function isDisplayableDate(date: Date | string | number, minYear = 1970):
 }
 
 export function formatRelativeTime(date: Date | string | number, locale?: string): string {
-  const parsedDate = parseDateInput(date)
+  const d = parseDateInput(date)
 
-  if (!isDisplayableDate(parsedDate)) {
+  if (!d || !isDisplayableDate(d)) {
     return '-'
   }
 
   const now = new Date()
-  const diff = now.getTime() - parsedDate.getTime()
+  const diff = now.getTime() - d.getTime()
 
   if (diff < 0) {
     return 'in the future'
@@ -75,7 +75,7 @@ export function formatRelativeTime(date: Date | string | number, locale?: string
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
 
   // For dates older than a week, show the actual date+time using browser locale
-  return parsedDate.toLocaleString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
+  return d.toLocaleString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -84,10 +84,10 @@ export function formatRelativeTime(date: Date | string | number, locale?: string
   })
 }
 
-export function formatAbsoluteTime(date: Date | string | number, locale?: string): string {
+export function formatAbsoluteTime(date: Date | string | number | null | undefined, locale?: string): string {
   const parsedDate = parseDateInput(date)
 
-  if (!isDisplayableDate(parsedDate)) {
+  if (!parsedDate || !isDisplayableDate(parsedDate)) {
     return '-'
   }
 
@@ -104,18 +104,18 @@ export function formatAbsoluteTime(date: Date | string | number, locale?: string
 
 
 export function formatAbsoluteTimeCompact(date: Date | string | number, locale?: string): string {
-  const parsedDate = parseDateInput(date)
-  if (!isDisplayableDate(parsedDate)) return '-'
-  return parsedDate.toLocaleString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
+  const d = parseDateInput(date)
+  if (!d || !isDisplayableDate(d)) return '-'
+  return d.toLocaleString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
     dateStyle: 'medium',
     timeStyle: 'short'
   } as Intl.DateTimeFormatOptions)
 }
 
-export function formatDatePairCompact(date: Date | string | null | undefined, locale?: string): string {
-  if (!date) return '-'
-  const abs = formatAbsoluteTimeCompact(date as any, locale)
-  const rel = formatRelativeTime(date as any, locale)
+export function formatDatePairCompact(date: Date | string | number | null | undefined, locale?: string): string {
+  if (date === null || date === undefined) return '-'
+  const abs = formatAbsoluteTimeCompact(date, locale)
+  const rel = formatRelativeTime(date, locale)
   if (abs === '-' && rel === '-') return '-'
   if (abs === '-' && rel !== '-') return rel
   if (rel === '-' && abs !== '-') return abs
@@ -124,17 +124,17 @@ export function formatDatePairCompact(date: Date | string | null | undefined, lo
 
 
 export function formatRelativeTimeShort(date: Date | string | number, locale?: string): string {
-  const parsedDate = parseDateInput(date)
-  if (!parsedDate || !isDisplayableDate(parsedDate)) return '-'
+  const d = parseDateInput(date)
+  if (!d || !isDisplayableDate(d)) return '-'
   const now = new Date()
-  const diff = now.getTime() - parsedDate.getTime()
+  const diff = now.getTime() - d.getTime()
   if (diff < 0) return 'soon'
   if (diff < 60000) return 'now'
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d`
   // older than a week -> show short date
-  return parsedDate.toLocaleDateString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
+  return d.toLocaleDateString(locale || (typeof navigator !== 'undefined' ? navigator.language : undefined), {
     month: 'short',
     day: 'numeric'
   })
@@ -161,10 +161,10 @@ export function formatAbsoluteTimeUltraCompact(date: Date | string | number, loc
   })
 }
 
-export function formatDatePairUltraCompact(date: Date | string | null | undefined, locale?: string): string {
-  if (!date) return '-'
-  const abs = formatAbsoluteTimeUltraCompact(date as any, locale)
-  const rel = formatRelativeTimeShort(date as any, locale)
+export function formatDatePairUltraCompact(date: Date | string | number | null | undefined, locale?: string): string {
+  if (date === null || date === undefined) return '-'
+  const abs = formatAbsoluteTimeUltraCompact(date, locale)
+  const rel = formatRelativeTimeShort(date, locale)
   if (abs === '-' && rel === '-') return '-'
   if (abs === '-' && rel !== '-') return rel
   if (rel === '-' && abs !== '-') return abs

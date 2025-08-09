@@ -1,13 +1,13 @@
 # EventStore Architecture
 
-The EventStore is the **nervous system** of the flunq.io workflow engine. It provides **Temporal-level resilience** with **pluggable backends** for maximum flexibility.
+The EventStore is the **nervous system** of the flunq.io workflow engine. It provides **high-level resilience** with **pluggable backends** for maximum flexibility.
 
 ## 🎯 **New Unified Architecture** - Generic EventStore Interface
 
 The EventStore is now a **library package** that services import directly, providing:
 
 - **🔄 Event Sourcing**: Complete event history with deterministic replay
-- **🛡️ Temporal-level Resilience**: Crash recovery, horizontal scaling, time travel debugging
+- **🛡️ High-level Resilience**: Crash recovery, horizontal scaling, time travel debugging
 - **🔌 Pluggable Backends**: Easy switching between Redis, Kafka, RabbitMQ
 - **⚡ High Performance**: Direct backend access, no HTTP overhead
 - **🎯 Single Source of Truth**: Unified event storage and streaming
@@ -44,16 +44,14 @@ type EventStore interface {
 
 ### **Current Implementations**
 
-#### **✅ Redis EventStore** (`worker/pkg/eventstore/redis/`)
+#### **✅ Redis Event Stream** (`shared/pkg/eventstreaming/redis_stream.go`)
 ```go
-// Redis implementation using Redis Streams
-type RedisEventStore struct {
-    client *redis.Client
-    logger eventstore.Logger
-}
-
-// Create Redis EventStore
-eventStore, err := redis.NewRedisEventStore("redis://localhost:6379", logger)
+// Create Redis Event Stream via factory
+stream, err := factory.NewEventStream(factory.EventStreamDeps{
+    Backend:     "redis",
+    RedisClient: redisClient,
+    Logger:      loggerAdapter,
+})
 ```
 
 **Features:**
@@ -73,25 +71,17 @@ eventStore, err := redis.NewRedisEventStore("redis://localhost:6379", logger)
 ### **Service Integration Pattern**
 
 ```
-┌─────────────┐    ┌─────────────────┐    ┌─────────────┐
-│   API       │───▶│  EventStore     │◀───│   Worker    │
-│   Service   │    │  Interface      │    │   Service   │
-└─────────────┘    │                 │    └─────────────┘
-                   │ ┌─────────────┐ │
-                   │ │Redis Streams│ │
-                   │ │ (current)   │ │
-                   │ └─────────────┘ │
-                   │                 │
-                   │ ┌─────────────┐ │
-                   │ │   Kafka     │ │
-                   │ │  (future)   │ │
-                   │ └─────────────┘ │
-                   │                 │
-                   │ ┌─────────────┐ │
-                   │ │ RabbitMQ    │ │
-                   │ │  (future)   │ │
-                   │ └─────────────┘ │
-                   └─────────────────┘
+┌─────────────┐           ┌─────────────┐           ┌─────────────┐
+│   API       │───┐   ┌──▶│  Worker     │◀──┐   ┌──▶│  Executor   │
+│   Service   │   │   │   │  Service    │   │   │   │  Service    │
+└─────────────┘   │   │   └─────────────┘   │   │   └─────────────┘
+                  │   │                      │   │
+                  ▼   ▼                      ▼   ▼
+           ┌────────────────┐        ┌──────────────────┐
+           │ Shared Event   │        │ Shared Database  │
+           │ Stream (Redis) │        │ (Redis -> pluggable)
+           │ -> pluggable   │        │ Postgres/Mongo…  │
+           └────────────────┘        └──────────────────┘
 ```
 
 **Benefits:**

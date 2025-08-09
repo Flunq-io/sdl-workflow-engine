@@ -36,8 +36,8 @@ export function LanguageThemeSwitcher() {
 
   // Extract locale from pathname (format: /tenant/locale/...)
   const pathSegments = pathname.split('/').filter(Boolean)
-  const locale = pathSegments.length >= 2 ? pathSegments[1] : 'en'
-  const tenant = pathSegments.length >= 1 ? pathSegments[0] : 'acme-inc'
+  const locale = pathSegments.length >= 2 ? pathSegments[1] : (process.env.NEXT_PUBLIC_DEFAULT_LOCALE || 'en')
+  const tenant = pathSegments.length >= 1 ? pathSegments[0] : (process.env.NEXT_PUBLIC_DEFAULT_TENANT || 'tenant')
 
   const currentLanguage = languages.find(lang => lang.code === locale)
 

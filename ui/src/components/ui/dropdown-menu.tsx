@@ -73,9 +73,15 @@ export function DropdownMenuTrigger({ children, asChild, className, onClick }: D
     onClick?.()
   }
 
-  if (asChild) {
-    return React.cloneElement(children as React.ReactElement, {
-      onClick: handleClick,
+  if (asChild && React.isValidElement(children)) {
+    type ChildProps = (React.ComponentProps<'a'> | React.ComponentProps<'button'>) & { className?: string; onClick?: (e: React.MouseEvent) => void }
+    const child = children as React.ReactElement<ChildProps>
+    return React.cloneElement(child, {
+      ...(child.props as ChildProps),
+      onClick: (e: React.MouseEvent) => {
+        child.props?.onClick?.(e)
+        handleClick()
+      },
       'aria-expanded': isOpen,
       'aria-haspopup': true
     })

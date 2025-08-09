@@ -76,8 +76,7 @@ ui/
 ## 🔧 Configuration
 
 Environment variables:
-- `NEXT_PUBLIC_API_URL`: API service URL
-- `NEXT_PUBLIC_WS_URL`: WebSocket URL for real-time updates
+- `NEXT_PUBLIC_API_URL`: API service URL (e.g., http://localhost:8080)
 - `NEXTAUTH_SECRET`: NextAuth.js secret
 - `NEXTAUTH_URL`: NextAuth.js URL
 

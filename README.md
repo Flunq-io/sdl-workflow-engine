@@ -5,25 +5,21 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐    ┌─────────────────┐    ┌─────────────┐
-│   API       │───▶│  EventStore     │◀───│   Worker    │
-│   Service   │    │  Interface      │    │   Service   │
-└─────────────┘    │                 │    └─────────────┘
-                   │ ┌─────────────┐ │
-┌─────────────┐    │ │Redis Streams│ │    ┌─────────────┐
-│  Executor   │───▶│ │ (current)   │ │◀───│ UI Service  │
-│  Service    │    │ └─────────────┘ │    └─────────────┘
-└─────────────┘    │                 │
-                   │ ┌─────────────┐ │
-                   │ │   Kafka     │ │
-                   │ │  (future)   │ │
-                   │ └─────────────┘ │
-                   │                 │
-                   │ ┌─────────────┐ │
-                   │ │ RabbitMQ    │ │
-                   │ │  (future)   │ │
-                   │ └─────────────┘ │
-                   └─────────────────┘
+┌─────────────┐           ┌─────────────┐           ┌─────────────┐
+│   API       │───┐   ┌──▶│  Worker     │◀──┐   ┌──▶│  Executor   │
+│   Service   │   │   │   │  Service    │   │   │   │  Service    │
+└─────────────┘   │   │   └─────────────┘   │   │   └─────────────┘
+                  │   │                      │   │
+                  ▼   ▼                      ▼   ▼
+           ┌────────────────┐        ┌──────────────────┐
+           │ Shared Event   │        │ Shared Database  │
+           │ Stream (Redis) │        │ (Redis -> pluggable)
+           │ -> pluggable   │        │ Postgres/Mongo…  │
+           └────────────────┘        └──────────────────┘
+
+Backends are selected via env and factories:
+- EVENT_STREAM_TYPE: redis (default), kafka, rabbitmq, nats
+- DB_TYPE: redis (default), postgres, mongo, dynamo
 ```
 
 ## 🚀 Services
@@ -65,34 +61,23 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 - **Deployment**: Docker, Kubernetes
 - **Monitoring**: OpenTelemetry, Prometheus
 
-## 🔌 EventStore Interface
+## 🔌 Shared interfaces and factories
 
-Flunq.io uses a unified EventStore interface for maximum flexibility:
+- Event streaming interface: shared/pkg/interfaces/event_streaming.go
+- Database interface: shared/pkg/interfaces/database.go
+- Factories: shared/pkg/factory/{eventstream_factory.go,database_factory.go}
 
-### **EventStore Interface** (`worker/pkg/eventstore/interface.go`)
-```go
-type EventStore interface {
-    Publish(ctx context.Context, stream string, event *CloudEvent) error
-    Subscribe(ctx context.Context, config SubscriptionConfig) (<-chan *CloudEvent, <-chan error, error)
-    ReadHistory(ctx context.Context, stream string, fromID string) ([]*CloudEvent, error)
-    CreateConsumerGroup(ctx context.Context, groupName string, streams []string) error
-    CreateCheckpoint(ctx context.Context, groupName, stream, messageID string) error
-    GetLastCheckpoint(ctx context.Context, groupName, stream string) (string, error)
-    Close() error
-}
-```
+Current default implementations
+- Event stream: Redis Streams (shared/pkg/eventstreaming/redis_stream.go)
+- Database: Redis (shared/pkg/storage/redis_database.go)
 
-### **Current Implementations**
-- **✅ Redis EventStore** (`worker/pkg/eventstore/redis/`) - Redis Streams with consumer groups
-- **🚧 Kafka EventStore** (planned) - High-throughput distributed streaming
-- **🚧 RabbitMQ EventStore** (planned) - Message queue with advanced routing
-- **🚧 PostgreSQL EventStore** (planned) - JSONB-based event storage
+Pluggable backends (contributors welcome)
+- Event stream: Kafka, RabbitMQ, NATS
+- Database: Postgres, MongoDB, DynamoDB
 
-### **Database** (`shared/pkg/interfaces/database.go`)
-- **Redis** (current) - JSON-serialized workflow state and task data
-- **PostgreSQL** (planned) - Relational database for workflow metadata
-- **MongoDB** (planned) - Document database for flexible schemas
-- **DynamoDB** (planned) - Serverless NoSQL for AWS environments
+Backends are selected by env via factories:
+- EVENT_STREAM_TYPE (redis|kafka|rabbitmq|nats)
+- DB_TYPE (redis|postgres|mongo|dynamo)
 
 All implementations follow the same interface contracts, making it easy to switch backends without code changes.
 

@@ -6,17 +6,13 @@ import { WorkflowList } from '@/components/workflow-list'
 import { ClientOnly } from '@/components/client-only'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useParams } from 'next/navigation'
 
-interface PageProps {
-  params: {
-    tenant: string;
-    locale: string;
-  };
-}
+export default function WorkflowsPage() {
+  const params = useParams<{ tenant: string; locale: string }>()
+  const tenant = String(params.tenant)
+  const locale = String(params.locale)
 
-export default function WorkflowsPage({ params }: PageProps) {
-  const { tenant, locale } = params;
-  
   // Create tenant-aware API client
   const apiClient = createTenantApiClient(tenant);
   

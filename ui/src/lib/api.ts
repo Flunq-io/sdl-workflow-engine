@@ -7,7 +7,7 @@ export interface Workflow {
   id: string
   name: string
   description: string
-  definition: Record<string, any>
+  definition: Record<string, unknown>
   state: 'active' | 'inactive'
   tags: string[]
   created_at: string
@@ -21,12 +21,12 @@ export interface Execution {
   workflow_id: string
   status: 'pending' | 'running' | 'waiting' | 'suspended' | 'cancelled' | 'faulted' | 'completed'
   correlation_id?: string
-  input?: Record<string, any>
-  output?: Record<string, any>
+  input?: Record<string, unknown>
+  output?: Record<string, unknown>
   error?: {
     message: string
     code: string
-    details?: Record<string, any>
+    details?: Record<string, unknown>
   }
   current_state?: string
   started_at: string
@@ -43,7 +43,7 @@ export interface WorkflowEvent {
   workflowid?: string
   executionid?: string
   taskid?: string
-  data?: Record<string, any>
+  data?: Record<string, unknown>
 }
 
 export interface ApiResponse<T> {
@@ -51,7 +51,7 @@ export interface ApiResponse<T> {
   error?: {
     code: string
     message: string
-    details?: Record<string, any>
+    details?: Record<string, unknown>
   }
 }
 
@@ -112,7 +112,7 @@ class ApiClient {
     return this.request(`/workflows/${id}`)
   }
 
-  async executeWorkflow(id: string, input: any, correlationId?: string): Promise<Execution> {
+  async executeWorkflow(id: string, input: Record<string, unknown>, correlationId?: string): Promise<Execution> {
     return this.request(`/workflows/${id}/execute`, {
       method: 'POST',
       body: JSON.stringify({
@@ -176,7 +176,7 @@ class ApiClient {
               ...execution,
               workflow_name: workflow.name
             })
-          } catch (error) {
+          } catch {
             // If execution not found in API service, create a minimal execution object
             allExecutions.push({
               id: executionId,
@@ -187,8 +187,8 @@ class ApiClient {
             })
           }
         }
-      } catch (error) {
-        console.warn(`Failed to get executions for workflow ${workflow.id}:`, error)
+      } catch (err) {
+        console.warn(`Failed to get executions for workflow ${workflow.id}:`, err)
       }
     }
 

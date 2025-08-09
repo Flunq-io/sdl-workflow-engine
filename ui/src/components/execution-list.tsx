@@ -20,7 +20,7 @@ import {
   Table,
   Workflow
 } from 'lucide-react'
-import { formatDurationHMS, formatDatePairUltraCompact } from '@/lib/utils'
+import { formatDurationHMS, formatDatePairUltraCompact, isDisplayableDate } from '@/lib/utils'
 
 interface ExecutionListProps {
   executions: (Execution & { workflow_name?: string })[]
@@ -86,7 +86,7 @@ function formatDuration(durationMs?: number): string {
   }
 }
 
-export function ExecutionList({ executions, tenant = 'acme-inc', locale = 'en' }: ExecutionListProps) {
+export function ExecutionList({ executions, tenant = '', locale = 'en' }: ExecutionListProps) {
   const [filter, setFilter] = useState<'all' | Execution['status']>('all')
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
 
@@ -195,7 +195,7 @@ export function ExecutionList({ executions, tenant = 'acme-inc', locale = 'en' }
                 <div className="space-y-1 text-sm">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Calendar className="h-4 w-4" />
-                    <span className="text-muted-foreground">
+                    <span className="text-muted-foreground" title={new Date(execution.started_at).toISOString()}>
                       Started {formatDatePairUltraCompact(execution.started_at, locale)}
                     </span>
                   </div>
@@ -277,7 +277,7 @@ export function ExecutionList({ executions, tenant = 'acme-inc', locale = 'en' }
                     </Badge>
                   </td>
                   <td className="p-4">
-                    <span className="text-sm">
+                    <span className="text-sm" title={new Date(execution.started_at).toISOString()}>
                       {formatDatePairUltraCompact(execution.started_at, locale)}
                     </span>
                   </td>

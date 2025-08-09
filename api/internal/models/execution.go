@@ -72,13 +72,21 @@ type CancelExecutionRequest struct {
 }
 
 // ToResponse converts an Execution to ExecutionResponse
+// Applies a conservative fallback for zero StartedAt only for terminal states
 func (e *Execution) ToResponse() ExecutionResponse {
+	started := e.StartedAt
+	if started.IsZero() {
+		// Only fallback in terminal states to avoid masking in-progress bugs
+		if (e.Status == ExecutionStatusCompleted || e.Status == ExecutionStatusCancelled || e.Status == ExecutionStatusFaulted) && e.CompletedAt != nil {
+			started = *e.CompletedAt
+		}
+	}
 	return ExecutionResponse{
 		ID:            e.ID,
 		WorkflowID:    e.WorkflowID,
 		Status:        e.Status,
 		CorrelationID: e.CorrelationID,
-		StartedAt:     e.StartedAt,
+		StartedAt:     started,
 		CompletedAt:   e.CompletedAt,
 	}
 }

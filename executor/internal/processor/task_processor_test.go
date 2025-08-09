@@ -9,19 +9,40 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/shared/pkg/cloudevents"
 	"github.com/flunq-io/executor/internal/executor"
+	"github.com/flunq-io/shared/pkg/cloudevents"
+	sharedinterfaces "github.com/flunq-io/shared/pkg/interfaces"
 )
 
-// MockEventStore is a mock implementation of EventStore
-type MockEventStore struct {
+// MockEventStream is a mock for the new EventStream interface used by TaskProcessor
+type MockEventStream struct {
 	mock.Mock
 }
 
-func (m *MockEventStore) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
-	args := m.Called(ctx, workflowID)
-	return args.Get(0).([]*cloudevents.CloudEvent), args.Error(1)
+func (m *MockEventStream) Subscribe(ctx context.Context, filters sharedinterfaces.StreamFilters) (sharedinterfaces.StreamSubscription, error) {
+	args := m.Called(ctx, filters)
+	return nil, args.Error(1)
 }
+
+func (m *MockEventStream) Publish(ctx context.Context, event *cloudevents.CloudEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
+func (m *MockEventStream) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
+	return nil, nil
+}
+
+func (m *MockEventStream) CreateConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
+}
+func (m *MockEventStream) DeleteConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
+}
+func (m *MockEventStream) GetStreamInfo(ctx context.Context) (*sharedinterfaces.StreamInfo, error) {
+	return &sharedinterfaces.StreamInfo{}, nil
+}
+func (m *MockEventStream) Close() error { return nil }
 
 // MockTaskExecutor is a mock implementation of TaskExecutor
 type MockTaskExecutor struct {
@@ -40,12 +61,13 @@ func (m *MockTaskExecutor) GetTaskType() string {
 
 func TestPublishTaskCompletedEvent(t *testing.T) {
 	// Setup
-	mockEventStore := new(MockEventStore)
+	mockStream := new(MockEventStream)
 	logger := zap.NewNop()
 
 	processor := &TaskProcessor{
-		eventStore: mockEventStore,
-		logger:     logger,
+		eventStream:   mockStream,
+		taskExecutors: map[string]executor.TaskExecutor{},
+		logger:        logger,
 	}
 
 	// Create a task result with WorkflowID and ExecutionID
@@ -60,8 +82,8 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 		ExecutedAt:  time.Now(),
 	}
 
-	// Setup mock expectation
-	mockEventStore.On("PublishEvent", mock.Anything, mock.MatchedBy(func(event *cloudevents.CloudEvent) bool {
+	// Setup mock expectation on stream.Publish
+	mockStream.On("Publish", mock.Anything, mock.MatchedBy(func(event *cloudevents.CloudEvent) bool {
 		// Verify the event has the correct structure
 		assert.Equal(t, "io.flunq.task.completed", event.Type)
 		assert.Equal(t, "test-workflow-456", event.WorkflowID)
@@ -87,5 +109,5 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
-	mockEventStore.AssertExpectations(t)
+	mockStream.AssertExpectations(t)
 }

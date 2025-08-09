@@ -9,15 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
-import { formatAbsoluteTime, formatAbsoluteTimeCompact, formatRelativeTime, formatDuration, formatDurationHMS } from '@/lib/utils'
-
-interface PageProps {
-  params: {
-    tenant: string;
-    locale: string;
-    id: string;
-  };
-}
+import { useParams } from 'next/navigation'
+import { formatAbsoluteTime, formatAbsoluteTimeCompact, formatRelativeTime } from '@/lib/utils'
 
 function getStatusColor(status: string) {
   switch (status.toLowerCase()) {
@@ -34,12 +27,15 @@ function getStatusColor(status: string) {
   }
 }
 
-export default function ExecutionDetailPage({ params }: PageProps) {
-  const { tenant, locale, id } = params;
-  
+export default function ExecutionDetailPage() {
+  const params = useParams<{ tenant: string; locale: string; id: string }>()
+  const tenant = String(params.tenant)
+  const locale = String(params.locale)
+  const id = String(params.id)
+
   // Create tenant-aware API client
   const apiClient = createTenantApiClient(tenant);
-  
+
   const { data: execution, isLoading: executionLoading, error: executionError } = useQuery({
     queryKey: ['execution', tenant, id],
     queryFn: () => apiClient.getExecution(id),
@@ -82,7 +78,7 @@ export default function ExecutionDetailPage({ params }: PageProps) {
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <h2 className="text-lg font-semibold text-foreground mb-2">Execution not found</h2>
-          <p className="text-muted-foreground">The execution with ID "{id}" could not be found.</p>
+          <p className="text-muted-foreground">The execution with ID &quot;{id}&quot; could not be found.</p>
           <Button asChild className="mt-4">
             <Link href={`/${tenant}/${locale}/executions`}>
               <ArrowLeft className="h-4 w-4 mr-2" />
@@ -150,12 +146,6 @@ export default function ExecutionDetailPage({ params }: PageProps) {
                 <p className="text-sm">
                   {formatAbsoluteTime(execution.completed_at, locale)} ({formatRelativeTime(execution.completed_at, locale)})
                 </p>
-              </div>
-            )}
-            {execution.tenant_id && (
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Tenant</label>
-                <p className="text-sm font-mono bg-muted px-2 py-1 rounded">{execution.tenant_id}</p>
               </div>
             )}
           </div>

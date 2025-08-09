@@ -101,11 +101,30 @@ func (a *SharedDatabaseAdapter) UpdateWorkflowState(ctx context.Context, workflo
 		execution.Status = sharedInterfaces.WorkflowStatusPending
 	}
 
-	// Convert timestamps
-	if state.CreatedAt != nil {
-		execution.StartedAt = state.CreatedAt.AsTime()
+	// Preserve existing execution timestamps to avoid regressions
+	existing, errGet := a.sharedDB.GetExecution(ctx, execution.ID)
+	if errGet == nil && existing != nil {
+		// StartedAt: keep existing if set; otherwise try state.CreatedAt
+		if !existing.StartedAt.IsZero() {
+			execution.StartedAt = existing.StartedAt
+		} else if state.CreatedAt != nil {
+			execution.StartedAt = state.CreatedAt.AsTime()
+		}
+		// CompletedAt: keep existing unless we transition to terminal
+		if existing.CompletedAt != nil {
+			execution.CompletedAt = existing.CompletedAt
+		}
+	} else {
+		// No existing record: initialize StartedAt from state.CreatedAt if available
+		if state.CreatedAt != nil {
+			execution.StartedAt = state.CreatedAt.AsTime()
+		}
 	}
-	if state.UpdatedAt != nil {
+
+	// Only set CompletedAt when entering a terminal status
+	if (execution.Status == sharedInterfaces.WorkflowStatusCompleted ||
+		execution.Status == sharedInterfaces.WorkflowStatusFailed ||
+		execution.Status == sharedInterfaces.WorkflowStatusCancelled) && state.UpdatedAt != nil {
 		updatedAt := state.UpdatedAt.AsTime()
 		execution.CompletedAt = &updatedAt
 	}

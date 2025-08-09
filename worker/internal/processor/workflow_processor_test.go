@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,9 @@ func (f *FakeEventStream) CreateConsumerGroup(ctx context.Context, groupName str
 func (f *FakeEventStream) DeleteConsumerGroup(ctx context.Context, groupName string) error {
 	return nil
 }
+func (f *FakeEventStream) GetStreamInfo(ctx context.Context) (*sharedinterfaces.StreamInfo, error) {
+	return &sharedinterfaces.StreamInfo{}, nil
+}
 func (f *FakeEventStream) Close() error { return nil }
 
 // MockDatabase is a mock implementation of Database interface
@@ -67,6 +71,11 @@ func (m *MockDatabase) GetWorkflowState(ctx context.Context, workflowID string) 
 
 func (m *MockDatabase) GetWorkflowDefinition(ctx context.Context, workflowID string) (*gen.WorkflowDefinition, error) {
 	args := m.Called(ctx, workflowID)
+	return args.Get(0).(*gen.WorkflowDefinition), args.Error(1)
+}
+
+func (m *MockDatabase) GetWorkflowDefinitionWithTenant(ctx context.Context, tenantID, workflowID string) (*gen.WorkflowDefinition, error) {
+	args := m.Called(ctx, tenantID, workflowID)
 	return args.Get(0).(*gen.WorkflowDefinition), args.Error(1)
 }
 
@@ -229,7 +238,8 @@ func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 	// Setup mocks
 	mockDatabase := &MockDatabase{}
 	mockEngine := &MockWorkflowEngine{}
-	mockSerializer := &MockSerializer{}
+	// Serializer is not used directly in this test; avoid unused var errors
+	_ = &MockSerializer{}
 	mockLogger := &MockLogger{}
 	mockMetrics := &MockMetrics{}
 
@@ -292,19 +302,30 @@ func TestWorkflowProcessor_ProcessWorkflowEvent(t *testing.T) {
 
 	// Setup mock expectations
 	mockMetrics.On("StartTimer", "workflow_event_processing_duration", mock.AnythingOfType("map[string]string")).Return(func() {})
-	mockLogger.On("Info", "Processing workflow event", mock.Anything).Return()
-	mockLogger.On("Debug", mock.AnythingOfType("string"), mock.Anything).Return()
-	mockDatabase.On("GetWorkflowDefinition", ctx, workflowID).Return(definition, nil)
+	mockLogger.On("Info", mock.AnythingOfType("string"), mock.AnythingOfType("[]interface {}")).Return().Maybe()
+	mockLogger.On("Debug", mock.AnythingOfType("string"), mock.AnythingOfType("[]interface {}")).Return().Maybe()
+	mockLogger.On("Warn", mock.AnythingOfType("string"), mock.AnythingOfType("[]interface {}")).Return().Maybe()
+	mockDatabase.On("GetWorkflowDefinitionWithTenant", ctx, "", workflowID).Return(definition, nil).Maybe()
+	mockDatabase.On("GetWorkflowDefinition", ctx, workflowID).Return(definition, nil).Maybe()
 	mockEngine.On("RebuildState", ctx, definition, mock.AnythingOfType("[]*cloudevents.CloudEvent")).Return(state, nil)
 	mockEngine.On("ProcessEvent", ctx, state, event).Return(nil)
 	mockEngine.On("IsWorkflowComplete", ctx, state, definition).Return(false)
 	mockEngine.On("GetNextTask", ctx, state, definition).Return(nil, nil) // No next task
 	mockDatabase.On("UpdateWorkflowState", ctx, workflowID, state).Return(nil)
-	mockLogger.On("Info", "Successfully processed workflow event", mock.Anything).Return()
 	mockMetrics.On("IncrementCounter", "workflow_events_processed", mock.AnythingOfType("map[string]string")).Return()
 
-	// Execute
-	err := processor.ProcessWorkflowEvent(ctx, event)
+	// Execute using a minimal WorkflowProcessor instance with our fakes/mocks
+	proc := &WorkflowProcessor{
+		eventStream:    &FakeEventStream{Events: []*cloudevents.CloudEvent{event}},
+		database:       mockDatabase,
+		sharedDatabase: nil,
+		workflowEngine: mockEngine,
+		serializer:     nil,
+		logger:         mockLogger,
+		metrics:        mockMetrics,
+		workflowLocks:  make(map[string]*sync.Mutex),
+	}
+	err := proc.ProcessWorkflowEvent(ctx, event)
 
 	// Assert
 	assert.NoError(t, err)

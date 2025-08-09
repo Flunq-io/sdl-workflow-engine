@@ -10,9 +10,8 @@ import (
 	goredis "github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/shared/pkg/eventstreaming"
+	"github.com/flunq-io/shared/pkg/factory"
 	"github.com/flunq-io/shared/pkg/interfaces"
-	"github.com/flunq-io/shared/pkg/storage"
 	"github.com/flunq-io/worker/internal/adapters"
 	"github.com/flunq-io/worker/internal/engine"
 	"github.com/flunq-io/worker/internal/processor"
@@ -119,14 +118,35 @@ func main() {
 		zapLogger.Fatal("Failed to connect to Redis", "error", err)
 	}
 
-	// Initialize shared database with tenant support
-	databaseLogger := &DatabaseLoggerAdapter{logger: logger}
-	sharedDatabase := storage.NewRedisDatabase(redisClient, databaseLogger, &interfaces.DatabaseConfig{
-		Type:       "redis",
-		Host:       getEnv("REDIS_HOST", "localhost"),
-		Port:       6379,
-		TenantMode: true, // Enable tenant mode for multi-tenant support
+	// Select Database implementation by config via shared factory
+	dbBackend := getEnv("DB_TYPE", "redis")
+	sharedDatabase, err := factory.NewDatabase(factory.DatabaseDeps{
+		Backend:     dbBackend,
+		RedisClient: redisClient,
+		Logger:      &DatabaseLoggerAdapter{logger: logger},
+		Config: &interfaces.DatabaseConfig{
+			Type:       dbBackend,
+			Host:       getEnv("REDIS_HOST", "localhost"),
+			Port:       6379,
+			TenantMode: true,
+		},
 	})
+	if err != nil {
+		zapLogger.Fatal("Failed to create Database", "error", err)
+	}
+
+	// Select EventStream implementation by config via shared factory
+	eventBackend := getEnv("EVENT_STREAM_TYPE", "redis")
+	eventStream, err := factory.NewEventStream(factory.EventStreamDeps{
+		Backend:     eventBackend,
+		RedisClient: redisClient,
+		Logger:      &LoggerAdapter{logger: logger},
+	})
+	if err != nil {
+		zapLogger.Fatal("Failed to create EventStream", "error", err)
+	}
+
+	// sharedDatabase already selected above via config
 
 	// Create adapter to bridge shared database to worker's interface
 	database := adapters.NewSharedDatabaseAdapter(sharedDatabase, zapLogger)
@@ -137,9 +157,7 @@ func main() {
 	// Initialize metrics (placeholder)
 	metrics := &adapters.NoOpMetrics{}
 
-	// Initialize shared event stream for both subscribing and publishing (tenant-isolated streams)
-	loggerAdapter := &LoggerAdapter{logger: logger}
-	eventStream := eventstreaming.NewRedisEventStream(redisClient, loggerAdapter)
+	// eventStream already selected above via config
 
 	// Initialize Serverless Workflow engine with event stream for wait tasks
 	workflowEngine := engine.NewServerlessWorkflowEngine(zapLogger, eventStream)

@@ -9,8 +9,7 @@ import {
   Calendar,
   Play,
   Pause,
-  Square,
-  AlertCircle,
+
   CheckCircle,
   Timer,
   Tag,
@@ -25,15 +24,13 @@ interface WorkflowDetailProps {
   events?: WorkflowEvent[]
 }
 
-function extractTaskNames(definition: Record<string, any>): string[] {
-  if (!definition || !definition.do || !Array.isArray(definition.do)) {
-    return []
-  }
+type DoStep = Record<string, unknown>
 
-  return definition.do.map((step: any) => {
-    const stepName = Object.keys(step)[0]
-    return stepName
-  }).filter(Boolean)
+function extractTaskNames(definition: { do?: DoStep[] } | null | undefined): string[] {
+  if (!definition || !Array.isArray(definition.do)) return []
+  return definition.do
+    .map((step) => Object.keys(step || {})[0])
+    .filter((name): name is string => Boolean(name))
 }
 
 function getStateIcon(state: Workflow['state']) {
@@ -55,9 +52,13 @@ function getTaskStatus(taskName: string, events: WorkflowEvent[] = []) {
     let eventTaskName = null
 
     if (event.type === 'io.flunq.task.requested') {
-      eventTaskName = event.data?.task_name
+      const dn = event.data as Record<string, unknown> | undefined
+      if (dn && typeof dn['task_name'] === 'string') eventTaskName = dn['task_name'] as string
     } else if (event.type === 'io.flunq.task.completed') {
-      eventTaskName = event.data?.data?.task_name || event.data?.task_name
+      const dn = event.data as Record<string, unknown> | undefined
+      const nested = dn?.['data'] as Record<string, unknown> | undefined
+      const name = (nested && typeof nested['task_name'] === 'string' ? nested['task_name'] : (dn && typeof dn['task_name'] === 'string' ? dn['task_name'] : null)) as string | null
+      eventTaskName = name
     }
 
     return eventTaskName === taskName
@@ -80,10 +81,10 @@ function getTaskStatus(taskName: string, events: WorkflowEvent[] = []) {
 }
 
 // Helper function to find the current active task
-function getCurrentTaskIndex(tasks: any[], events: WorkflowEvent[] = []) {
+function getCurrentTaskIndex(tasks: Array<Record<string, unknown>>, events: WorkflowEvent[] = []) {
   // Find the task that was requested but not yet completed (active task)
   for (let i = 0; i < tasks.length; i++) {
-    const taskName = tasks[i].name || Object.keys(tasks[i])[0]
+    const taskName = (tasks[i] as Record<string, unknown>)['name'] as string || Object.keys(tasks[i])[0] as string
     const status = getTaskStatus(taskName, events)
 
     if (status === 'active') {
@@ -93,7 +94,7 @@ function getCurrentTaskIndex(tasks: any[], events: WorkflowEvent[] = []) {
 
   // If no active task found, find the first pending task
   for (let i = 0; i < tasks.length; i++) {
-    const taskName = tasks[i].name || Object.keys(tasks[i])[0]
+    const taskName = (tasks[i] as Record<string, unknown>)['name'] as string || Object.keys(tasks[i])[0] as string
     const status = getTaskStatus(taskName, events)
 
     if (status === 'pending') {
@@ -119,7 +120,8 @@ function getStateVariant(state: Workflow['state']) {
 export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
   const taskNames = extractTaskNames(workflow.definition)
   const locale = useLocale()
-  const currentTaskIndex = getCurrentTaskIndex(workflow.definition?.do || [], events)
+  const doSteps = (workflow.definition?.do as Array<Record<string, unknown>>) || []
+  const currentTaskIndex = getCurrentTaskIndex(doSteps, events)
 
   // Debug task statuses
   console.log('=== Task Status Debug ===')
@@ -165,7 +167,7 @@ export function WorkflowDetail({ workflow, events = [] }: WorkflowDetailProps) {
                       <div className={`w-2 h-2 rounded-full ${
                         taskStatus === 'completed' ? 'bg-green-500' :
                         taskStatus === 'active' ? 'bg-blue-500' :
-                        isCurrentTask && workflow.status === 'running' ? 'bg-blue-500' :
+                        isCurrentTask && workflow.state === 'active' ? 'bg-blue-500' :
                         'bg-gray-300'
                       }`} />
                       <span className={`${

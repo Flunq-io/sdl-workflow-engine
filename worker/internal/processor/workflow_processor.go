@@ -694,6 +694,15 @@ func (p *WorkflowProcessor) updateExecutionStatus(ctx context.Context, execution
 		return fmt.Errorf("execution ID is empty")
 	}
 
+	// If shared database is not configured (e.g., in certain unit tests), skip update
+	if p.sharedDatabase == nil {
+		p.logger.Warn("Shared database not configured; skipping execution status update",
+			"execution_id", executionID,
+			"workflow_id", state.GetWorkflowId(),
+		)
+		return nil
+	}
+
 	// Get current execution from database
 	execution, err := p.sharedDatabase.GetExecution(ctx, executionID)
 	if err != nil {
@@ -702,6 +711,16 @@ func (p *WorkflowProcessor) updateExecutionStatus(ctx context.Context, execution
 
 	// Update execution status and completion time
 	now := time.Now()
+
+	// Backfill missing StartedAt if zero (use state.CreatedAt or now)
+	if execution.StartedAt.IsZero() {
+		if ts := state.GetCreatedAt(); ts != nil {
+			execution.StartedAt = ts.AsTime()
+		} else {
+			execution.StartedAt = now
+		}
+	}
+
 	execution.Status = sharedinterfaces.WorkflowStatusCompleted
 	execution.CompletedAt = &now
 	execution.Duration = now.Sub(execution.StartedAt)

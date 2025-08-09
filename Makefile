@@ -16,7 +16,6 @@ help:
 	@echo ""
 	@echo "Individual service commands:"
 	@echo "  make api       - Start only API service"
-	@echo "  make events    - Start only Events service"
 	@echo "  make worker    - Start only Worker service"
 	@echo "  make executor  - Start only Executor service"
 	@echo "  make ui        - Start only UI service"
@@ -42,8 +41,6 @@ clean:
 test:
 	@echo "Running API tests..."
 	cd api && go test ./...
-	@echo "Running Events tests..."
-	cd events && go test ./...
 	@echo "Running Worker tests..."
 	cd worker && go test ./...
 	@echo "Running Executor tests..."
@@ -55,8 +52,6 @@ test:
 lint:
 	@echo "Linting API..."
 	cd api && go vet ./...
-	@echo "Linting Events..."
-	cd events && go vet ./...
 	@echo "Linting Worker..."
 	cd worker && go vet ./...
 	@echo "Linting Executor..."
@@ -68,8 +63,6 @@ lint:
 deps:
 	@echo "Installing API dependencies..."
 	cd api && go mod tidy
-	@echo "Installing Events dependencies..."
-	cd events && go mod tidy
 	@echo "Installing Worker dependencies..."
 	cd worker && go mod tidy
 	@echo "Installing Executor dependencies..."
@@ -82,12 +75,8 @@ api:
 	docker-compose up -d redis
 	cd api && go run cmd/server/main.go
 
-events:
-	docker-compose up -d redis
-	cd events && go run cmd/server/main.go
-
 worker:
-	docker-compose up -d redis events
+	docker-compose up -d redis
 	cd worker && go run cmd/worker/main.go
 
 executor:
@@ -116,6 +105,5 @@ redis-cli:
 monitor:
 	@echo "Service Status:"
 	@curl -s http://localhost:8080/health | jq . || echo "API: DOWN"
-	@curl -s http://localhost:8081/health | jq . || echo "Events: DOWN"
 	@curl -s http://localhost:8083/health | jq . || echo "Executor: DOWN"
 	@echo "UI: http://localhost:3000"

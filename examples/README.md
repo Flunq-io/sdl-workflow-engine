@@ -15,12 +15,8 @@ This folder contains examples for testing the **Worker service** with **Serverle
 # Terminal 1: Redis
 redis-server
 
-# Terminal 2: Event Store
-cd events
-go run cmd/server/main.go
-
-# Terminal 3: Worker
-cd worker  
+# Terminal 2: Worker
+cd worker
 go run cmd/server/main.go
 ```
 
@@ -32,7 +28,7 @@ Follow the instructions in `postman-requests.md` to:
 
 ### 3. Expected Flow
 ```
-Postman → Event Store → Redis Streams → Worker → Process DSL 1.0.0
+Postman → API → Shared Event Stream (Redis) → Worker → Executor (for call/wait/inject) → back to API
 ```
 
 ## 🎯 What the Worker Does
@@ -55,11 +51,6 @@ Postman → Event Store → Redis Streams → Worker → Process DSL 1.0.0
 ```bash
 redis-cli XRANGE events:global - +
 redis-cli XRANGE events:workflow:simple-test-workflow - +
-```
-
-**Event Store API:**
-```bash
-curl http://localhost:8081/api/v1/events/simple-test-workflow
 ```
 
 The Worker service now supports **Serverless Workflow DSL 1.0.0** with complete event-driven orchestration! 🎉
