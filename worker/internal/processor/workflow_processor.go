@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,11 +32,11 @@ type WorkflowProcessor struct {
 	waitScheduler WaitScheduler
 
 	// Processing state
-	eventCh <-chan *cloudevents.CloudEvent
-	errorCh <-chan error
-	running bool
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	subscription sharedinterfaces.StreamSubscription
+	errorCh      <-chan error
+	running      bool
+	stopCh       chan struct{}
+	wg           sync.WaitGroup
 	// Per-event workers waitgroup (for graceful shutdown when concurrency > 1)
 	tasksWG sync.WaitGroup
 	// Concurrency control
@@ -84,6 +85,16 @@ func NewWorkflowProcessor(
 func (p *WorkflowProcessor) Start(ctx context.Context) error {
 	p.logger.Info("Starting workflow processor")
 
+	// Health check Redis / stream connectivity
+	if info, err := p.eventStream.GetStreamInfo(ctx); err != nil {
+		p.logger.Warn("Stream info not available yet", "error", err)
+	} else {
+		p.logger.Info("Stream info",
+			"stream", info.StreamName,
+			"message_count", info.MessageCount,
+			"consumer_groups", info.ConsumerGroups)
+	}
+
 	// Use shared event streaming for tenant-isolated streams
 	filters := sharedinterfaces.StreamFilters{
 		EventTypes: []string{
@@ -92,18 +103,22 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 			"io.flunq.task.completed",
 			"io.flunq.timer.fired", // Resume waits
 		},
-		WorkflowIDs:   []string{},                    // Subscribe to all workflows
-		ConsumerGroup: fmt.Sprintf("worker-service"), // stable group for consumer-group semantics
+		WorkflowIDs:   []string{}, // Subscribe to all workflows
+		ConsumerGroup: getEnvDefault("WORKER_CONSUMER_GROUP", "worker-service"),
 		ConsumerName:  fmt.Sprintf("worker-%s", uuid.New().String()[:8]),
+		BatchCount:    getEnvIntDefault("WORKER_STREAM_BATCH", 10),
+		BlockTimeout:  getEnvDurationDefault("WORKER_STREAM_BLOCK", time.Second),
 	}
 
-	subscription, err := p.eventStream.Subscribe(ctx, filters)
+	// Create subscription once and keep reference for acks
+	var err error
+	p.subscription, err = p.eventStream.Subscribe(ctx, filters)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to event stream: %w", err)
 	}
 
 	// Get channels from subscription (for errors)
-	p.errorCh = subscription.Errors()
+	p.errorCh = p.subscription.Errors()
 	p.running = true
 
 	// Start event processing goroutine
@@ -111,7 +126,70 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 	go p.eventProcessingLoop(ctx)
 
 	p.logger.Info("Workflow processor started successfully")
+
+	// Optionally start background reclaim loop for orphaned pending messages
+	if getEnvBoolDefault("WORKER_RECLAIM_ENABLED", false) {
+		go p.reclaimOrphanedMessages(ctx, filters.ConsumerGroup, filters.ConsumerName)
+	}
 	return nil
+}
+
+// Background goroutine to reclaim orphaned pending messages
+func (p *WorkflowProcessor) reclaimOrphanedMessages(ctx context.Context, consumerGroup, consumerName string) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			if p.eventStream != nil {
+				if reclaimed, err := p.eventStream.ReclaimPending(ctx, consumerGroup, consumerName, 60*time.Second); err != nil {
+					p.logger.Warn("Failed to reclaim pending messages", "error", err)
+				} else if reclaimed > 0 {
+					p.logger.Info("Reclaimed pending messages", "count", reclaimed)
+				}
+			}
+		}
+	}
+}
+
+// env helpers (scoped to processor package)
+func getEnvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+func getEnvIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+func getEnvDurationDefault(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
+func getEnvBoolDefault(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if v == "1" || strings.ToLower(v) == "true" || strings.ToLower(v) == "yes" {
+			return true
+		}
+		if v == "0" || strings.ToLower(v) == "false" || strings.ToLower(v) == "no" {
+			return false
+		}
+	}
+	return def
 }
 
 // Stop stops the workflow processor
@@ -150,26 +228,12 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 	defer p.wg.Done()
 	p.logger.Info("Starting event processing loop (consumer-group mode)")
 
-	// We consume via the shared EventStream subscription which uses consumer groups under the hood
-	subscription, err := p.eventStream.Subscribe(ctx, sharedinterfaces.StreamFilters{
-		EventTypes: []string{
-			"io.flunq.workflow.created",
-			"io.flunq.execution.started",
-			"io.flunq.task.completed",
-			"io.flunq.timer.fired",
-		},
-		WorkflowIDs:   []string{},
-		ConsumerGroup: "worker-service",
-		ConsumerName:  fmt.Sprintf("worker-%s", uuid.New().String()[:8]),
-	})
-	if err != nil {
-		p.logger.Error("Failed to subscribe to stream in processing loop", "error", err)
+	if p.subscription == nil {
+		p.logger.Error("No subscription available in processor")
 		return
 	}
-	defer subscription.Close()
-
-	eventsCh := subscription.Events()
-	errorsCh := subscription.Errors()
+	eventsCh := p.subscription.Events()
+	errorsCh := p.subscription.Errors()
 
 	for {
 		select {
@@ -193,11 +257,8 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 					p.tasksWG.Done()
 				}()
 
-				// Ensure serial processing per workflow using existing locks
+				// Per-workflow locking is handled inside ProcessWorkflowEvent; avoid double-locking here
 				workflowID := ev.WorkflowID
-				lock := p.getWorkflowLock(workflowID)
-				lock.Lock()
-				defer lock.Unlock()
 
 				// Process with retry and ack semantics
 				var lastErr error
@@ -220,10 +281,23 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 						continue
 					}
 
-					// Success: acknowledge via subscription if possible
-					if ackKey, ok := ev.Extensions["ack_key"].(string); ok {
-						// The subscription.Acknowledge requires eventID, but we need stream+id; ack via StreamSubscription if supported
-						_ = ackKey // retained for future direct-ack APIs
+					// Success: acknowledge via subscription if possible (prefer ack_key; fallback to stream|msgID)
+					ackID := ""
+					if key, ok := ev.Extensions["ack_key"].(string); ok {
+						ackID = key
+					} else {
+						if stream, ok1 := ev.Extensions["redis_stream"].(string); ok1 {
+							if msgID, ok2 := ev.Extensions["redis_msg_id"].(string); ok2 {
+								ackID = stream + "|" + msgID
+							}
+						}
+					}
+					if ackID == "" {
+						p.logger.Error("CRITICAL: No ack key available; cannot acknowledge", "event_id", ev.ID, "extensions", ev.Extensions)
+					} else if p.subscription != nil {
+						if err := p.subscription.Acknowledge(ctx, ackID); err != nil {
+							p.logger.Warn("Ack failed", "event_id", ev.ID, "ack_id", ackID, "error", err)
+						}
 					}
 					p.logger.Debug("Processed and acked event", "event_id", ev.ID, "workflow_id", workflowID)
 					return
@@ -231,6 +305,7 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 
 				// After max retries: send to DLQ and log
 				p.logger.Error("Event failed after max retries; sending to DLQ",
+
 					"event_id", ev.ID,
 					"workflow_id", workflowID,
 					"error", lastErr)
@@ -241,6 +316,17 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 				dlqEvent.Type = "io.flunq.event.dlq"
 				dlqEvent.AddExtension("reason", fmt.Sprintf("max_retries_exceeded:%v", lastErr))
 				_ = p.eventStream.Publish(ctx, dlqEvent)
+
+				// After DLQ publish, acknowledge the original message to prevent it from staying pending
+				if ackKey, ok := ev.Extensions["ack_key"].(string); ok {
+					if p.subscription != nil {
+						if err := p.subscription.Acknowledge(ctx, ackKey); err != nil {
+							p.logger.Warn("Ack after DLQ failed", "event_id", ev.ID, "error", err)
+						} else {
+							p.logger.Info("Acked message after DLQ", "event_id", ev.ID)
+						}
+					}
+				}
 			}(event)
 		case err := <-errorsCh:
 			if err != nil {
@@ -262,12 +348,15 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 	p.logger.Info("Processing workflow event",
 		"event_id", event.ID,
 		"event_type", event.Type,
-		"workflow_id", event.WorkflowID)
+		"workflow_id", event.WorkflowID,
+		"execution_id", event.ExecutionID,
+		"tenant_id", event.TenantID)
 
 	// Event data (debug)
-	p.logger.Debug("Event data",
+	p.logger.Info("Event data debug",
 		"data_type", fmt.Sprintf("%T", event.Data),
-		"data_value", event.Data)
+		"data_value", event.Data,
+		"extensions", event.Extensions)
 
 	// Get workflow-specific lock to prevent concurrent processing of same workflow
 	workflowLock := p.getWorkflowLock(event.WorkflowID)
@@ -336,7 +425,7 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 
 	definition, err := p.getWorkflowDefinitionWithTenant(ctx, event.TenantID, event.WorkflowID)
 	if err != nil {
-		p.logger.Error("Failed to get workflow definition",
+		p.logger.Error("CRITICAL: Failed to get workflow definition",
 			"workflow_id", event.WorkflowID,
 			"tenant_id", event.TenantID,
 			"error", err)
@@ -350,18 +439,25 @@ func (p *WorkflowProcessor) ProcessWorkflowEvent(ctx context.Context, event *clo
 		"definition_id", definition.Id)
 
 	// Step 3: Rebuild Complete Workflow State
+	p.logger.Info("Rebuilding complete workflow state", "workflow_id", event.WorkflowID, "event_count", len(events))
 	state, err := p.rebuildCompleteWorkflowState(ctx, definition, events)
 	if err != nil {
+		p.logger.Error("CRITICAL: Failed to rebuild workflow state", "workflow_id", event.WorkflowID, "error", err)
 		return fmt.Errorf("failed to rebuild workflow state: %w", err)
 	}
+	p.logger.Info("Successfully rebuilt workflow state", "workflow_id", event.WorkflowID, "status", state.Status)
 
 	// Step 4: Process New Event
+	p.logger.Info("Processing new event", "workflow_id", event.WorkflowID, "event_type", event.Type)
 	if err := p.processNewEvent(ctx, state, event); err != nil {
+		p.logger.Error("CRITICAL: Failed to process new event", "workflow_id", event.WorkflowID, "event_type", event.Type, "error", err)
 		return fmt.Errorf("failed to process new event: %w", err)
 	}
 
 	// Step 5: Execute Next SDL Step
+	p.logger.Info("Executing next SDL step", "workflow_id", event.WorkflowID)
 	if err := p.executeNextSDLStep(ctx, state, definition); err != nil {
+		p.logger.Error("CRITICAL: Failed to execute next SDL step", "workflow_id", event.WorkflowID, "error", err)
 		return fmt.Errorf("failed to execute next SDL step: %w", err)
 	}
 

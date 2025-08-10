@@ -47,6 +47,10 @@ func (f *FakeEventStream) DeleteConsumerGroup(ctx context.Context, groupName str
 func (f *FakeEventStream) GetStreamInfo(ctx context.Context) (*sharedinterfaces.StreamInfo, error) {
 	return &sharedinterfaces.StreamInfo{}, nil
 }
+func (f *FakeEventStream) ReclaimPending(ctx context.Context, consumerGroup, consumerName string, minIdle time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (f *FakeEventStream) Close() error { return nil }
 
 // MockDatabase is a mock implementation of Database interface

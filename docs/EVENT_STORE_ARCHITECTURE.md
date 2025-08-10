@@ -277,6 +277,55 @@ All events follow the CloudEvents v1.0 specification with flunq.io extensions:
 
 ## 🔌 Service Integration
 
+### **Worker Service Integration**
+The Worker service implements sophisticated event processing with the EventStore:
+
+```go
+// Initialize EventStore with shared interface
+eventStore, err := factory.CreateEventStream(eventStreamType, config, logger)
+if err != nil {
+    log.Fatal("Failed to initialize event store:", err)
+}
+
+// Create WorkflowProcessor with EventStore
+processor := processor.NewWorkflowProcessor(
+    eventStore,        // Shared event streaming
+    database,          // Worker-specific database
+    sharedDatabase,    // Shared database for executions
+    workflowEngine,    // Serverless Workflow SDK
+    serializer,        // Protobuf serializer
+    logger,           // Structured logger
+    metrics,          // Metrics collector
+)
+```
+
+#### **Event Processing Pattern**
+```go
+// Subscribe to events with consumer groups
+filters := sharedinterfaces.StreamFilters{
+    EventTypes: []string{
+        "io.flunq.execution.started",
+        "io.flunq.task.completed",
+        "io.flunq.timer.fired",
+    },
+    ConsumerGroup: "worker-service",
+    ConsumerName:  "worker-{uuid}",
+}
+
+subscription, err := eventStore.Subscribe(ctx, filters)
+eventsCh := subscription.Events()
+
+// Process events with resilience
+for event := range eventsCh {
+    // 1. Filter by execution ID for isolation
+    // 2. Rebuild state from event history
+    // 3. Process new event
+    // 4. Execute next workflow step
+    // 5. Acknowledge event
+}
+```
+
+### **Generic Service Integration**
 Services use the EventStore interface directly:
 
 ```go
@@ -324,24 +373,53 @@ for {
 
 ## 📊 Event Types
 
-### Workflow Events
-- `io.flunq.workflow.created`
-- `io.flunq.workflow.started`
-- `io.flunq.workflow.completed`
-- `io.flunq.workflow.failed`
-- `io.flunq.workflow.cancelled`
+### **Worker Service Event Processing**
+The Worker service implements sophisticated event filtering and processing:
 
-### Task Events
-- `io.flunq.task.scheduled`
-- `io.flunq.task.started`
-- `io.flunq.task.completed`
-- `io.flunq.task.failed`
-- `io.flunq.task.retried`
+#### **Subscribed Events**
+- `io.flunq.execution.started` - Triggers workflow execution start
+- `io.flunq.task.completed` - Processes task completion (executor-service only)
+- `io.flunq.timer.fired` - Resumes workflows after wait tasks
 
-### State Events
-- `io.flunq.state.entered`
-- `io.flunq.state.exited`
-- `io.flunq.state.error`
+#### **Skipped Events**
+- `io.flunq.workflow.created` - Handled by API service, skipped by Worker
+- `io.flunq.task.completed` from non-executor sources - Prevents infinite loops
+
+#### **Published Events**
+- `io.flunq.task.requested` - Requests task execution from executor service
+- `io.flunq.workflow.completed` - Signals workflow completion
+- `io.flunq.event.dlq` - Dead letter queue for failed events
+
+### **Complete Event Catalog**
+
+#### **Workflow Events**
+- `io.flunq.workflow.created` - Workflow definition created
+- `io.flunq.workflow.started` - Workflow execution initiated
+- `io.flunq.workflow.completed` - Workflow finished successfully
+- `io.flunq.workflow.failed` - Workflow failed with error
+- `io.flunq.workflow.cancelled` - Workflow cancelled by user
+
+#### **Execution Events**
+- `io.flunq.execution.started` - Execution instance started
+- `io.flunq.execution.completed` - Execution instance completed
+- `io.flunq.execution.failed` - Execution instance failed
+
+#### **Task Events**
+- `io.flunq.task.requested` - Task execution requested
+- `io.flunq.task.started` - Task execution started
+- `io.flunq.task.completed` - Task execution completed
+- `io.flunq.task.failed` - Task execution failed
+- `io.flunq.task.retried` - Task execution retried
+
+#### **Timer Events**
+- `io.flunq.timer.scheduled` - Timer scheduled for wait task
+- `io.flunq.timer.fired` - Timer fired, resume workflow
+
+#### **System Events**
+- `io.flunq.event.dlq` - Dead letter queue event
+- `io.flunq.state.entered` - State transition entered
+- `io.flunq.state.exited` - State transition exited
+- `io.flunq.state.error` - State transition error
 
 ## 🛡️ **Enterprise-Grade Resilience Features**
 

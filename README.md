@@ -40,9 +40,15 @@ Backends are selected via env and factories:
 - **Features**: Event sourcing, resilient design, pluggable backends (Redis/Kafka/RabbitMQ)
 
 ### **Worker Service** (`/worker`)
-- **Language**: Go  
-- **Purpose**: Workflow execution engine
-- **Features**: DSL interpretation, state management, task scheduling
+- **Language**: Go
+- **Purpose**: Event-driven workflow execution engine
+- **Features**:
+  - **Event Processing**: Sophisticated event filtering and processing with consumer groups
+  - **State Rebuilding**: Complete workflow state reconstruction from event history
+  - **Execution Isolation**: Per-execution event filtering prevents cross-execution contamination
+  - **Wait Task Handling**: Event-driven timeouts using timer service integration
+  - **Resilience**: Retry logic, dead letter queues, orphaned message recovery
+  - **Concurrency**: Configurable worker concurrency with per-workflow locking
 
 ### **Executor Service** (`/executor`)
 - **Language**: Go
@@ -117,12 +123,16 @@ See individual service READMEs for detailed setup instructions.
 
 - [x] **Core DSL parser and validator** - Supports DSL 1.0.0 (YAML) and 0.8 (JSON)
 - [x] **Redis-based event streaming** - CloudEvents compliant with Redis Streams
-- [x] **Basic workflow execution engine** - Full task execution pipeline
+- [x] **Advanced workflow execution engine** - Event-driven processing with state rebuilding
 - [x] **EventStore architecture** - Unified interface with pluggable backends (Redis/Kafka/RabbitMQ)
 - [x] **Enhanced I/O storage** - Complete workflow and task input/output data storage
 - [x] **Generic interfaces** - Pluggable storage and streaming backends
 - [x] **Multi-tenant support** - Tenant isolation across all services
 - [x] **Web UI with event timeline** - Real-time workflow monitoring with I/O data visualization
+- [x] **Event processing resilience** - Consumer groups, retry logic, dead letter queues
+- [x] **Execution isolation** - Per-execution event filtering prevents state contamination
+- [x] **Wait task processing** - Event-driven timeouts using timer service integration
+- [x] **Concurrency control** - Configurable worker concurrency with per-workflow locking
 
 ## 🎯 Roadmap
 

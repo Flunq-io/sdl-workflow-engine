@@ -265,6 +265,12 @@ func (e *ServerlessWorkflowEngine) processWorkflowCreatedEvent(state *gen.Workfl
 func (e *ServerlessWorkflowEngine) processExecutionStartedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
 	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_RUNNING
 
+	// Ensure workflow instance ID stays consistent with event stream routing
+	// Use the instance-level identifier from the event, not the definition ID
+	if event.WorkflowID != "" {
+		state.WorkflowId = event.WorkflowID
+	}
+
 	// Extract execution context
 	if eventData, ok := event.Data.(map[string]interface{}); ok {
 		context := &gen.ExecutionContext{

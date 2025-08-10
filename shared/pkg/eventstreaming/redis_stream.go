@@ -73,23 +73,28 @@ func (r *RedisEventStream) getStreamKey(event *cloudevents.CloudEvent) string {
 
 // discoverStreams finds all streams matching the subscription filters
 func (r *RedisEventStream) discoverStreams(ctx context.Context, filters interfaces.StreamFilters) []string {
-	// Use SCAN to find all keys matching the tenant:*:workflow:*:events pattern
+	// Include both per-workflow and per-tenant stream shapes, plus DLQs
 	var streams []string
-	pattern := "tenant:*:workflow:*:events"
-
-	iter := r.client.Scan(ctx, 0, pattern, 0).Iterator()
-	for iter.Next(ctx) {
-		key := iter.Val()
-		// Check if this stream matches our filters
-		if r.streamMatchesFilters(key, filters) {
-			streams = append(streams, key)
+	patterns := []string{
+		"tenant:*:workflow:*:events",
+		"tenant:*:workflow:*:events:dlq",
+		"workflow:events:*",
+		"workflow:events:dlq:*",
+		"events:global",
+		"events:global:dlq",
+	}
+	for _, pattern := range patterns {
+		iter := r.client.Scan(ctx, 0, pattern, 0).Iterator()
+		for iter.Next(ctx) {
+			key := iter.Val()
+			if r.streamMatchesFilters(key, filters) {
+				streams = append(streams, key)
+			}
+		}
+		if err := iter.Err(); err != nil {
+			r.logger.Error("Error scanning for streams", "pattern", pattern, "error", err)
 		}
 	}
-
-	if err := iter.Err(); err != nil {
-		r.logger.Error("Error scanning for streams", "error", err)
-	}
-
 	return streams
 }
 
@@ -111,6 +116,7 @@ func (r *RedisEventStream) Subscribe(ctx context.Context, filters interfaces.Str
 		stopCh:        make(chan struct{}),
 		consumerGroup: filters.ConsumerGroup,
 		consumerName:  filters.ConsumerName,
+		initialRead:   make(map[string]bool),
 	}
 
 	// Generate consumer name if not provided
@@ -322,13 +328,51 @@ func (r *RedisEventStream) GetStreamInfo(ctx context.Context) (*interfaces.Strea
 		return nil, fmt.Errorf("failed to get stream info: %w", err)
 	}
 
+	// Try to get consumer group stats for the default group if it exists
+	groupsResult, _ := r.client.XInfoGroups(ctx, streamKey).Result()
+	var groups []interfaces.ConsumerGroupInfo
+	for _, g := range groupsResult {
+		groups = append(groups, interfaces.ConsumerGroupInfo{
+			Name:      g.Name,
+			Consumers: int64(g.Consumers),
+			Pending:   g.Pending,
+		})
+	}
+
 	return &interfaces.StreamInfo{
-		StreamName:      streamKey,
-		MessageCount:    info.Length,
-		ConsumerGroups:  []string{}, // Would need additional call to get groups
-		LastMessageTime: time.Now(), // Would need to parse from last message
-		Metadata:        map[string]string{},
+		StreamName:   streamKey,
+		MessageCount: info.Length,
+		ConsumerGroups: func() []string {
+			arr := make([]string, len(groups))
+			for i, gg := range groups {
+				arr[i] = gg.Name
+			}
+			return arr
+		}(),
+		Groups:          groups,
+		PendingCount:    0, // total pending not available in XINFO STREAM; computed via XPending per-group when needed
+		LastMessageTime: time.Now(),
+		Metadata:        map[string]string{"stream": streamKey},
 	}, nil
+}
+
+// ReclaimPending reclaims pending messages idle longer than minIdle to the given consumer
+func (r *RedisEventStream) ReclaimPending(ctx context.Context, consumerGroup, consumerName string, minIdle time.Duration) (int, error) {
+	streamKey := "events:global"
+	// Claim up to 100 pending messages that have been idle longer than minIdle
+	msgs, startID, err := r.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream:   streamKey,
+		Group:    consumerGroup,
+		Consumer: consumerName,
+		MinIdle:  minIdle,
+		Start:    "0-0",
+		Count:    100,
+	}).Result()
+	_ = startID
+	if err != nil {
+		return 0, err
+	}
+	return len(msgs), nil
 }
 
 // Close closes the stream connection
@@ -346,6 +390,8 @@ type RedisStreamSubscription struct {
 	stopCh        chan struct{}
 	consumerGroup string
 	consumerName  string
+	startTime     time.Time
+	initialRead   map[string]bool // per-stream one-time historical catch-up
 }
 
 // Events returns the events channel
@@ -359,9 +405,18 @@ func (s *RedisStreamSubscription) Errors() <-chan error {
 }
 
 // Acknowledge acknowledges processing of an event
+// eventID may be either the raw Redis message ID or a composite "stream|id" ack key
 func (s *RedisStreamSubscription) Acknowledge(ctx context.Context, eventID string) error {
 	streamKey := "events:global"
-	return s.client.XAck(ctx, streamKey, s.consumerGroup, eventID).Err()
+	msgID := eventID
+	if strings.Contains(eventID, "|") {
+		parts := strings.SplitN(eventID, "|", 2)
+		if len(parts) == 2 {
+			streamKey = parts[0]
+			msgID = parts[1]
+		}
+	}
+	return s.client.XAck(ctx, streamKey, s.consumerGroup, msgID).Err()
 }
 
 // Close closes the subscription
@@ -431,12 +486,20 @@ func (s *RedisStreamSubscription) start(ctx context.Context) {
 				"stream_args", streamArgs)
 
 			// Read from all Redis streams
+			batch := int64(10)
+			if s.filters.BatchCount > 0 {
+				batch = int64(s.filters.BatchCount)
+			}
+			block := time.Second
+			if s.filters.BlockTimeout > 0 {
+				block = s.filters.BlockTimeout
+			}
 			result, err := s.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 				Group:    s.consumerGroup,
 				Consumer: s.consumerName,
 				Streams:  streamArgs,
-				Count:    10,
-				Block:    time.Second,
+				Count:    batch,
+				Block:    block,
 			}).Result()
 
 			if err != nil {
@@ -481,6 +544,13 @@ func (s *RedisStreamSubscription) start(ctx context.Context) {
 						event.Extensions["redis_stream"] = streamName
 						event.Extensions["redis_msg_id"] = message.ID
 						s.eventsCh <- event
+					} else {
+						// Not for this subscriber: immediately ack in this consumer group to avoid growing PEL
+						if err := s.client.XAck(ctx, streamName, s.consumerGroup, message.ID).Err(); err != nil {
+							s.logger.Warn("Failed to ack filtered-out message", "stream", streamName, "id", message.ID, "error", err)
+						} else {
+							s.logger.Debug("Acked filtered-out message", "stream", streamName, "id", message.ID)
+						}
 					}
 				}
 			}

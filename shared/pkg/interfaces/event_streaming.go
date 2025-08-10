@@ -28,6 +28,9 @@ type EventStream interface {
 	// GetStreamInfo returns stream information
 	GetStreamInfo(ctx context.Context) (*StreamInfo, error)
 
+	// ReclaimPending reclaims pending messages idle longer than minIdle to the given consumer
+	ReclaimPending(ctx context.Context, consumerGroup, consumerName string, minIdle time.Duration) (int, error)
+
 	// Close closes the stream connection
 	Close() error
 }
@@ -40,6 +43,8 @@ type StreamFilters struct {
 	StartFrom     string            `json:"start_from"`     // Start reading from specific position
 	ConsumerGroup string            `json:"consumer_group"` // Consumer group name
 	ConsumerName  string            `json:"consumer_name"`  // Consumer name within group
+	BatchCount    int               `json:"batch_count"`    // Number of messages to request per read (implementation-specific)
+	BlockTimeout  time.Duration     `json:"block_timeout"`  // Max time to block waiting for messages
 	Extensions    map[string]string `json:"extensions"`     // Filter by extension attributes
 }
 
@@ -52,19 +57,30 @@ type StreamSubscription interface {
 	Errors() <-chan error
 
 	// Acknowledge acknowledges processing of an event
+	// eventID can be an implementation-specific token; for Redis Streams this may be
+	// either the raw message ID or a composite "stream|id" ack key.
 	Acknowledge(ctx context.Context, eventID string) error
 
 	// Close closes the subscription
 	Close() error
 }
 
+// ConsumerGroupInfo represents per-consumer-group stats
+type ConsumerGroupInfo struct {
+	Name      string `json:"name"`
+	Consumers int64  `json:"consumers"`
+	Pending   int64  `json:"pending"`
+}
+
 // StreamInfo represents stream information
 type StreamInfo struct {
-	StreamName      string            `json:"stream_name"`
-	MessageCount    int64             `json:"message_count"`
-	ConsumerGroups  []string          `json:"consumer_groups"`
-	LastMessageTime time.Time         `json:"last_message_time"`
-	Metadata        map[string]string `json:"metadata"`
+	StreamName      string              `json:"stream_name"`
+	MessageCount    int64               `json:"message_count"`
+	ConsumerGroups  []string            `json:"consumer_groups"`
+	Groups          []ConsumerGroupInfo `json:"groups"`
+	PendingCount    int64               `json:"pending_count"`
+	LastMessageTime time.Time           `json:"last_message_time"`
+	Metadata        map[string]string   `json:"metadata"`
 }
 
 // StreamConfig represents stream configuration

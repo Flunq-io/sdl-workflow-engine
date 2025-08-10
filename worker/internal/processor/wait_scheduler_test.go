@@ -25,12 +25,19 @@ func (c *captureEventStream) Publish(ctx context.Context, event *cloudevents.Clo
 func (c *captureEventStream) GetEventHistory(ctx context.Context, workflowID string) ([]*cloudevents.CloudEvent, error) {
 	return nil, nil
 }
-func (c *captureEventStream) CreateConsumerGroup(ctx context.Context, groupName string) error { return nil }
-func (c *captureEventStream) DeleteConsumerGroup(ctx context.Context, groupName string) error { return nil }
+func (c *captureEventStream) CreateConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
+}
+func (c *captureEventStream) DeleteConsumerGroup(ctx context.Context, groupName string) error {
+	return nil
+}
 func (c *captureEventStream) GetStreamInfo(ctx context.Context) (*sharedinterfaces.StreamInfo, error) {
 	return &sharedinterfaces.StreamInfo{}, nil
 }
 func (c *captureEventStream) Close() error { return nil }
+func (c *captureEventStream) ReclaimPending(ctx context.Context, consumerGroup, consumerName string, minIdle time.Duration) (int, error) {
+	return 0, nil
+}
 
 func TestTimerWaitScheduler_PublishesScheduledEvent(t *testing.T) {
 	es := &captureEventStream{}
@@ -62,4 +69,3 @@ func TestTimerWaitScheduler_PublishesScheduledEvent(t *testing.T) {
 		assert.Contains(t, m, "fire_at")
 	}
 }
-
