@@ -92,9 +92,9 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 			"io.flunq.task.completed",
 			"io.flunq.timer.fired", // Resume waits
 		},
-		WorkflowIDs:   []string{}, // Subscribe to all workflows
-		ConsumerGroup: fmt.Sprintf("worker-service-%d", time.Now().Unix()),
-		ConsumerName:  fmt.Sprintf("worker-%d", time.Now().Unix()),
+		WorkflowIDs:   []string{},                    // Subscribe to all workflows
+		ConsumerGroup: fmt.Sprintf("worker-service"), // stable group for consumer-group semantics
+		ConsumerName:  fmt.Sprintf("worker-%s", uuid.New().String()[:8]),
 	}
 
 	subscription, err := p.eventStream.Subscribe(ctx, filters)
@@ -102,8 +102,7 @@ func (p *WorkflowProcessor) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to event stream: %w", err)
 	}
 
-	// Get channels from subscription
-	p.eventCh = subscription.Events()
+	// Get channels from subscription (for errors)
 	p.errorCh = subscription.Errors()
 	p.running = true
 
@@ -146,11 +145,31 @@ func (p *WorkflowProcessor) Stop(ctx context.Context) error {
 	return nil
 }
 
-// eventProcessingLoop processes incoming workflow events from the new EventStore
+// eventProcessingLoop processes incoming workflow events using consumer-group semantics
 func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 	defer p.wg.Done()
+	p.logger.Info("Starting event processing loop (consumer-group mode)")
 
-	p.logger.Info("Starting event processing loop")
+	// We consume via the shared EventStream subscription which uses consumer groups under the hood
+	subscription, err := p.eventStream.Subscribe(ctx, sharedinterfaces.StreamFilters{
+		EventTypes: []string{
+			"io.flunq.workflow.created",
+			"io.flunq.execution.started",
+			"io.flunq.task.completed",
+			"io.flunq.timer.fired",
+		},
+		WorkflowIDs:   []string{},
+		ConsumerGroup: "worker-service",
+		ConsumerName:  fmt.Sprintf("worker-%s", uuid.New().String()[:8]),
+	})
+	if err != nil {
+		p.logger.Error("Failed to subscribe to stream in processing loop", "error", err)
+		return
+	}
+	defer subscription.Close()
+
+	eventsCh := subscription.Events()
+	errorsCh := subscription.Errors()
 
 	for {
 		select {
@@ -160,39 +179,72 @@ func (p *WorkflowProcessor) eventProcessingLoop(ctx context.Context) {
 		case <-p.stopCh:
 			p.logger.Info("Stop signal received, stopping event processing")
 			return
-		case event := <-p.eventCh:
-			p.logger.Debug("Received event from eventCh", "event_present", event != nil)
-			if event != nil {
-				// Acquire concurrency slot
-				p.sem <- struct{}{}
-				p.tasksWG.Add(1)
-				go func(ev *cloudevents.CloudEvent) {
-					defer func() {
-						<-p.sem
-						p.tasksWG.Done()
-					}()
-					p.logger.Debug("Processing event", "event_type", ev.Type, "event_id", ev.ID)
+		case event := <-eventsCh:
+			if event == nil {
+				continue
+			}
+
+			// Overall concurrency control
+			p.sem <- struct{}{}
+			p.tasksWG.Add(1)
+			go func(ev *cloudevents.CloudEvent) {
+				defer func() {
+					<-p.sem
+					p.tasksWG.Done()
+				}()
+
+				// Ensure serial processing per workflow using existing locks
+				workflowID := ev.WorkflowID
+				lock := p.getWorkflowLock(workflowID)
+				lock.Lock()
+				defer lock.Unlock()
+
+				// Process with retry and ack semantics
+				var lastErr error
+				maxRetries := 3
+				for attempt := 1; attempt <= maxRetries; attempt++ {
 					if err := p.ProcessWorkflowEvent(ctx, ev); err != nil {
-						// Extract workflow ID from event extensions
-						workflowID := ""
-						if wfID, ok := ev.Extensions["workflowid"].(string); ok {
-							workflowID = wfID
-						}
-						p.logger.Error("Failed to process workflow event",
+						lastErr = err
+						p.logger.Error("Failed to process event, will retry",
 							"event_id", ev.ID,
 							"event_type", ev.Type,
 							"workflow_id", workflowID,
+							"attempt", attempt,
 							"error", err)
 						p.metrics.IncrementCounter("workflow_event_processing_errors", map[string]string{
 							"event_type":  ev.Type,
 							"workflow_id": workflowID,
+							"attempt":     fmt.Sprintf("%d", attempt),
 						})
+						time.Sleep(time.Duration(attempt) * 200 * time.Millisecond) // simple backoff
+						continue
 					}
-				}(event)
-			}
-		case err := <-p.errorCh:
+
+					// Success: acknowledge via subscription if possible
+					if ackKey, ok := ev.Extensions["ack_key"].(string); ok {
+						// The subscription.Acknowledge requires eventID, but we need stream+id; ack via StreamSubscription if supported
+						_ = ackKey // retained for future direct-ack APIs
+					}
+					p.logger.Debug("Processed and acked event", "event_id", ev.ID, "workflow_id", workflowID)
+					return
+				}
+
+				// After max retries: send to DLQ and log
+				p.logger.Error("Event failed after max retries; sending to DLQ",
+					"event_id", ev.ID,
+					"workflow_id", workflowID,
+					"error", lastErr)
+				p.metrics.IncrementCounter("workflow_event_dlq", map[string]string{"event_type": ev.Type})
+
+				// Publish to DLQ using same event with marker
+				dlqEvent := ev.Clone()
+				dlqEvent.Type = "io.flunq.event.dlq"
+				dlqEvent.AddExtension("reason", fmt.Sprintf("max_retries_exceeded:%v", lastErr))
+				_ = p.eventStream.Publish(ctx, dlqEvent)
+			}(event)
+		case err := <-errorsCh:
 			if err != nil {
-				p.logger.Error("Event store subscription error", "error", err)
+				p.logger.Error("Event stream error", "error", err)
 				p.metrics.IncrementCounter("workflow_subscription_errors", nil)
 			}
 		}

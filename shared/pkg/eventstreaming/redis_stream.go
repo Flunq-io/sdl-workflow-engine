@@ -472,9 +472,15 @@ func (s *RedisStreamSubscription) start(ctx context.Context) {
 
 					// Apply filters
 					if s.shouldProcessEvent(event) {
+						// Attach ack metadata so the consumer can ack after successful processing
+						if event.Extensions == nil {
+							event.Extensions = make(map[string]interface{})
+						}
+						ackKey := fmt.Sprintf("%s|%s", streamName, message.ID)
+						event.Extensions["ack_key"] = ackKey
+						event.Extensions["redis_stream"] = streamName
+						event.Extensions["redis_msg_id"] = message.ID
 						s.eventsCh <- event
-						// Auto-acknowledge the message
-						s.client.XAck(ctx, streamName, s.consumerGroup, message.ID)
 					}
 				}
 			}
