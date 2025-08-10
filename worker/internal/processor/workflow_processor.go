@@ -27,6 +27,9 @@ type WorkflowProcessor struct {
 	logger         interfaces.Logger
 	metrics        interfaces.Metrics
 
+	// Wait scheduling abstraction
+	waitScheduler WaitScheduler
+
 	// Processing state
 	eventCh <-chan *cloudevents.CloudEvent
 	errorCh <-chan error
@@ -69,6 +72,7 @@ func NewWorkflowProcessor(
 		serializer:     serializer,
 		logger:         logger,
 		metrics:        metrics,
+		waitScheduler:  NewTimerWaitScheduler(eventStream),
 		stopCh:         make(chan struct{}),
 		workflowLocks:  make(map[string]*sync.Mutex),
 		maxConcurrency: maxConc,
@@ -489,55 +493,40 @@ func (p *WorkflowProcessor) processNewEvent(ctx context.Context, state *gen.Work
 	return nil
 }
 
-// executeTask executes a specific task based on its type
-func (p *WorkflowProcessor) executeTask(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
-	p.logger.Info("Executing task",
-		"workflow_id", state.WorkflowId,
-		"task_name", task.Name,
-		"task_type", task.TaskType)
-
-	// Handle wait tasks specially - execute locally and set workflow to waiting
-	if task.TaskType == "wait" {
-		return p.executeWaitTaskLocally(ctx, task, state)
-	}
-
-	// Send all other tasks to Executor Service for execution
-	return p.publishTaskRequestedEvent(ctx, task, state)
-}
-
-// executeWaitTaskLocally executes wait tasks locally and sets workflow to waiting status
-func (p *WorkflowProcessor) executeWaitTaskLocally(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
-	p.logger.Info("Executing wait task locally - workflow will pause",
-		"workflow_id", state.WorkflowId,
-		"task_name", task.Name)
-
-	// Execute the wait task using the workflow engine
-	taskData, err := p.workflowEngine.ExecuteTask(ctx, task, state)
-	if err != nil {
-		p.logger.Error("Failed to execute wait task",
-			"workflow_id", state.WorkflowId,
-			"task_name", task.Name,
-			"error", err)
-		return fmt.Errorf("failed to execute wait task: %w", err)
-	}
-
-	// Set workflow status to waiting
-	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_WAITING
-
-	// Keep the wait task in pending tasks - do NOT add to completed tasks until wait duration has elapsed
-	// The task will remain in PendingTasks until the scheduled timer event completes it
-
-	p.logger.Info("Wait task initiated - workflow is now waiting",
-		"workflow_id", state.WorkflowId,
-		"task_name", task.Name,
-		"workflow_status", "waiting")
-
-	// Publish wait task initiated event
-	return p.publishWaitTaskInitiatedEvent(ctx, task, taskData, state)
-}
-
 // publishTaskRequestedEvent publishes a TaskRequested event for external execution
 func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task *gen.PendingTask, state *gen.WorkflowState) error {
+	// Special-case: wait tasks should be scheduled via timer service, not sent to executor
+	if task.TaskType == "wait" {
+		executionID := ""
+		tenantID := ""
+		if state.Context != nil {
+			executionID = state.Context.ExecutionId
+			tenantID = state.Context.TenantId
+		}
+		if task.Input == nil {
+			return fmt.Errorf("wait task missing input")
+		}
+		inputMap := task.Input.AsMap()
+		durationStr, ok := inputMap["duration"].(string)
+		if !ok || durationStr == "" {
+			return fmt.Errorf("wait task missing duration")
+		}
+		duration, err := time.ParseDuration(durationStr)
+		if err != nil {
+			return fmt.Errorf("invalid wait duration: %w", err)
+		}
+		// Delegate scheduling to the WaitScheduler abstraction
+		if err := p.waitScheduler.Schedule(ctx, tenantID, state.WorkflowId, executionID, task.Name, duration); err != nil {
+			return fmt.Errorf("failed to schedule wait via timer service: %w", err)
+		}
+		p.logger.Info("Scheduled wait via timer service",
+			"workflow_id", state.WorkflowId,
+			"task_name", task.Name,
+			"duration", duration)
+		return nil
+	}
+
+	// Default path: publish io.flunq.task.requested for executor
 	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
 
 	// Get execution ID and tenant ID safely
@@ -562,16 +551,6 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 	if task.Input != nil {
 		inputMap := task.Input.AsMap()
 
-		// For wait tasks, extract duration
-		if task.TaskType == "wait" {
-			if duration, exists := inputMap["duration"]; exists {
-				parameters["duration"] = duration
-				p.logger.Debug("Adding duration to task parameters",
-					"task_name", task.Name,
-					"duration", duration)
-			}
-		}
-
 		// For set tasks, extract set data
 		if task.TaskType == "set" {
 			if setData, exists := inputMap["set_data"]; exists {
@@ -581,7 +560,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 
 		// Pass through other input data
 		for key, value := range inputMap {
-			if key != "duration" && key != "set_data" {
+			if key != "set_data" {
 				inputData[key] = value
 			}
 		}
@@ -610,7 +589,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			"config": map[string]interface{}{
 				"timeout":    300, // 5 minutes
 				"retries":    3,
-				"parameters": parameters, // Task-specific parameters including duration
+				"parameters": parameters,
 			},
 		},
 	}
@@ -842,190 +821,6 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 		"workflow_id", state.WorkflowId,
 		"task_name", nextTask.Name,
 		"task_type", nextTask.TaskType)
-
-	return nil
-}
-
-// publishTaskScheduledEvent publishes a TaskScheduled event
-func (p *WorkflowProcessor) publishTaskScheduledEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState) error {
-	// Get tenant ID from state context
-	tenantID := ""
-	if state.Context != nil {
-		tenantID = state.Context.TenantId
-	}
-
-	event := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("task-scheduled-%s", taskID),
-		Source:      "worker-service",
-		SpecVersion: "1.0",
-		Type:        "io.flunq.task.scheduled",
-		Time:        time.Now(),
-		TenantID:    tenantID,
-		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
-		TaskID:      taskID,
-		Data: map[string]interface{}{
-			"task_id":      taskID,
-			"task_name":    task.Name,
-			"task_type":    task.TaskType,
-			"workflow_id":  state.WorkflowId,
-			"execution_id": state.Context.ExecutionId,
-			"scheduled_at": time.Now().Format(time.RFC3339),
-			"scheduled_by": "worker-service",
-		},
-	}
-
-	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
-	if err := p.eventStream.Publish(ctx, event); err != nil {
-		return fmt.Errorf("failed to store task scheduled event: %w", err)
-	}
-
-	return nil
-}
-
-// publishTaskStartedEvent publishes a TaskStarted event
-func (p *WorkflowProcessor) publishTaskStartedEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState) error {
-	// Get tenant ID from state context
-	tenantID := ""
-	if state.Context != nil {
-		tenantID = state.Context.TenantId
-	}
-
-	event := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("task-started-%s", taskID),
-		Source:      "worker-service",
-		SpecVersion: "1.0",
-		Type:        "io.flunq.task.started",
-		Time:        time.Now(),
-		TenantID:    tenantID,
-		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
-		TaskID:      taskID,
-		Data: map[string]interface{}{
-			"task_id":      taskID,
-			"task_name":    task.Name,
-			"task_type":    task.TaskType,
-			"workflow_id":  state.WorkflowId,
-			"execution_id": state.Context.ExecutionId,
-			"started_at":   time.Now().Format(time.RFC3339),
-			"worker_id":    "worker-service",
-		},
-	}
-
-	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
-	if err := p.eventStream.Publish(ctx, event); err != nil {
-		return fmt.Errorf("failed to store task started event: %w", err)
-	}
-
-	p.logger.Info("Task started",
-		"task_id", taskID,
-		"task_name", task.Name,
-		"workflow_id", state.WorkflowId)
-
-	return nil
-}
-
-// publishTaskFailedEvent publishes a TaskFailed event
-func (p *WorkflowProcessor) publishTaskFailedEvent(ctx context.Context, taskID string, task *gen.PendingTask, state *gen.WorkflowState, taskErr error, startTime time.Time) error {
-	// Get tenant ID from state context
-	tenantID := ""
-	if state.Context != nil {
-		tenantID = state.Context.TenantId
-	}
-
-	event := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("task-failed-%s", taskID),
-		Source:      "worker-service",
-		SpecVersion: "1.0",
-		Type:        "io.flunq.task.failed",
-		Time:        time.Now(),
-		TenantID:    tenantID,
-		WorkflowID:  state.WorkflowId,
-		ExecutionID: state.Context.ExecutionId,
-		TaskID:      taskID,
-		Data: map[string]interface{}{
-			"task_id":       taskID,
-			"task_name":     task.Name,
-			"task_type":     task.TaskType,
-			"workflow_id":   state.WorkflowId,
-			"execution_id":  state.Context.ExecutionId,
-			"started_at":    startTime.Format(time.RFC3339),
-			"failed_at":     time.Now().Format(time.RFC3339),
-			"error_message": taskErr.Error(),
-			"worker_id":     "worker-service",
-		},
-	}
-
-	// Publish event using shared event streaming (auto-routes to tenant-isolated streams)
-	if err := p.eventStream.Publish(ctx, event); err != nil {
-		return fmt.Errorf("failed to store task failed event: %w", err)
-	}
-
-	p.logger.Error("Task failed",
-		"task_id", taskID,
-		"task_name", task.Name,
-		"workflow_id", state.WorkflowId,
-		"error", taskErr)
-
-	return nil
-}
-
-// publishWaitTaskInitiatedEvent publishes an event indicating that a wait task has been initiated
-func (p *WorkflowProcessor) publishWaitTaskInitiatedEvent(ctx context.Context, task *gen.PendingTask, taskData *gen.TaskData, state *gen.WorkflowState) error {
-	// Get tenant ID from state context
-	tenantID := ""
-	executionID := ""
-	if state.Context != nil {
-		tenantID = state.Context.TenantId
-		executionID = state.Context.ExecutionId
-	}
-
-	// Create task ID
-	taskID := fmt.Sprintf("task-%s", task.Name)
-
-	// Create CloudEvent for wait task initiated
-	event := &cloudevents.CloudEvent{
-		ID:          fmt.Sprintf("wait-initiated-%s-%d", task.Name, time.Now().Unix()),
-		Source:      "worker-service",
-		SpecVersion: "1.0",
-		Type:        "io.flunq.wait.initiated", // Trace-only; actual scheduling emitted by engine as io.flunq.timer.scheduled
-		TenantID:    tenantID,
-		WorkflowID:  state.WorkflowId,
-		ExecutionID: executionID,
-		TaskID:      taskID,
-		Time:        time.Now(),
-		Data: map[string]interface{}{
-			"task_name": task.Name,
-			"task_type": "wait",
-			"data": map[string]interface{}{
-				"input":  taskData.Input.AsMap(),
-				"output": taskData.Output.AsMap(),
-				"metadata": map[string]interface{}{
-					"started_at":   taskData.Metadata.StartedAt.AsTime().Format(time.RFC3339),
-					"completed_at": nil, // Will be set when wait actually completes
-					"duration_ms":  taskData.Metadata.DurationMs,
-					"task_type":    taskData.Metadata.TaskType,
-					"status":       "waiting", // Special status for wait tasks
-				},
-			},
-		},
-	}
-
-	// Publish the event
-	if err := p.eventStream.Publish(ctx, event); err != nil {
-		p.logger.Error("Failed to publish wait task initiated event",
-			"workflow_id", state.WorkflowId,
-			"task_name", task.Name,
-			"event_id", event.ID,
-			"error", err)
-		return fmt.Errorf("failed to publish wait task initiated event: %w", err)
-	}
-
-	p.logger.Info("Published wait task initiated event",
-		"workflow_id", state.WorkflowId,
-		"task_name", task.Name,
-		"event_id", event.ID,
-		"event_type", event.Type)
 
 	return nil
 }
