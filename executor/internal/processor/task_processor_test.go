@@ -42,6 +42,10 @@ func (m *MockEventStream) DeleteConsumerGroup(ctx context.Context, groupName str
 func (m *MockEventStream) GetStreamInfo(ctx context.Context) (*sharedinterfaces.StreamInfo, error) {
 	return &sharedinterfaces.StreamInfo{}, nil
 }
+func (m *MockEventStream) ReclaimPending(ctx context.Context, consumerGroup, consumerName string, minIdleTime time.Duration) (int, error) {
+	args := m.Called(ctx, consumerGroup, consumerName, minIdleTime)
+	return args.Int(0), args.Error(1)
+}
 func (m *MockEventStream) Close() error { return nil }
 
 // MockTaskExecutor is a mock implementation of TaskExecutor

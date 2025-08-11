@@ -52,8 +52,23 @@ Backends are selected via env and factories:
 
 ### **Executor Service** (`/executor`)
 - **Language**: Go
-- **Purpose**: External API integration and task execution
-- **Features**: HTTP calls, retries, circuit breakers, rate limiting
+- **Purpose**: External API integration and task execution with enterprise-grade resilience
+- **Features**:
+  - **Task Execution**: HTTP calls, data manipulation, wait task handling
+  - **Event Processing**: Consumer groups, retry logic, dead letter queues
+  - **Resilience**: Message acknowledgment, orphaned message recovery
+  - **Concurrency**: Configurable task concurrency with semaphore control
+  - **Error Handling**: Exponential backoff, circuit breakers, rate limiting
+
+### **Timer Service** (`/timer`)
+- **Language**: Go
+- **Purpose**: Event-driven timer scheduling for wait tasks
+- **Features**:
+  - **Timer Management**: Redis ZSET-based timer storage and scheduling
+  - **Event Processing**: Consumer groups, retry logic, message acknowledgment
+  - **Resilience**: Dead letter queues, orphaned message recovery
+  - **Precision**: Sub-second timer precision with efficient batch processing
+  - **Scalability**: Horizontal scaling with consumer group load balancing
 
 ### **UI Service** (`/ui`)
 - **Language**: Next.js/TypeScript
@@ -129,10 +144,13 @@ See individual service READMEs for detailed setup instructions.
 - [x] **Generic interfaces** - Pluggable storage and streaming backends
 - [x] **Multi-tenant support** - Tenant isolation across all services
 - [x] **Web UI with event timeline** - Real-time workflow monitoring with I/O data visualization
-- [x] **Event processing resilience** - Consumer groups, retry logic, dead letter queues
+- [x] **Event processing resilience** - Consumer groups, retry logic, dead letter queues across all services
 - [x] **Execution isolation** - Per-execution event filtering prevents state contamination
-- [x] **Wait task processing** - Event-driven timeouts using timer service integration
-- [x] **Concurrency control** - Configurable worker concurrency with per-workflow locking
+- [x] **Wait task processing** - Event-driven timeouts using enhanced timer service
+- [x] **Concurrency control** - Configurable concurrency with per-workflow locking
+- [x] **Enhanced executor service** - Resilient task execution with retry logic and acknowledgment
+- [x] **Enhanced timer service** - Enterprise-grade timer scheduling with consumer groups
+- [x] **Unified resilience patterns** - Consistent error handling across Worker, Executor, and Timer services
 
 ## 🎯 Roadmap
 

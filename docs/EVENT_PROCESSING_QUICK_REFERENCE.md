@@ -12,22 +12,40 @@ Event Received → Filter & Validate → Fetch History → Rebuild State → Pro
 
 ## 📨 Event Types
 
-### **Processed by Worker**
+### **Worker Service**
+#### **Processed Events**
 - ✅ `io.flunq.execution.started` - Start workflow execution
 - ✅ `io.flunq.task.completed` - Task completion (executor-service only)
 - ✅ `io.flunq.timer.fired` - Resume after wait task
 
-### **Skipped by Worker**
+#### **Skipped Events**
 - ❌ `io.flunq.workflow.created` - Handled by API service
 - ❌ `io.flunq.task.completed` from worker-service - Prevents loops
 
-### **Published by Worker**
+#### **Published Events**
 - 📤 `io.flunq.task.requested` - Request task execution
 - 📤 `io.flunq.workflow.completed` - Workflow finished
 - 📤 `io.flunq.event.dlq` - Dead letter queue
 
+### **Executor Service**
+#### **Processed Events**
+- ✅ `io.flunq.task.requested` - Task execution requests
+
+#### **Published Events**
+- 📤 `io.flunq.task.completed` - Task execution results
+- 📤 `io.flunq.task.dlq` - Dead letter queue for failed tasks
+
+### **Timer Service**
+#### **Processed Events**
+- ✅ `io.flunq.timer.scheduled` - Timer scheduling requests
+
+#### **Published Events**
+- 📤 `io.flunq.timer.fired` - Timer expiration notifications
+- 📤 `io.flunq.timer.dlq` - Dead letter queue for failed timers
+
 ## 🔧 Key Configuration
 
+### **Worker Service**
 ```bash
 # Concurrency
 WORKER_CONCURRENCY=4                    # Concurrent processors
@@ -37,10 +55,43 @@ WORKER_STREAM_BLOCK=1s                  # Block timeout
 
 # Resilience
 WORKER_RECLAIM_ENABLED=false            # Orphaned message reclaim
+```
 
+### **Executor Service**
+```bash
+# Concurrency
+EXECUTOR_CONCURRENCY=4                  # Concurrent task processors
+EXECUTOR_CONSUMER_GROUP=executor-service # Consumer group name
+EXECUTOR_STREAM_BATCH=10                # Event batch size
+EXECUTOR_STREAM_BLOCK=1s                # Block timeout
+
+# Resilience
+EXECUTOR_RECLAIM_ENABLED=false          # Orphaned message reclaim
+```
+
+### **Timer Service**
+```bash
+# Concurrency
+TIMER_CONCURRENCY=2                     # Concurrent timer processors
+TIMER_CONSUMER_GROUP=timer-service      # Consumer group name
+TIMER_STREAM_BATCH=10                   # Event batch size
+TIMER_STREAM_BLOCK=1s                   # Block timeout
+
+# Timer Configuration
+TIMER_MAX_SLEEP=1s                      # Maximum sleep between checks
+TIMER_LOOKAHEAD=100ms                   # Lookahead time for precision
+TIMER_BATCH_SIZE=100                    # Timer processing batch size
+
+# Resilience
+TIMER_RECLAIM_ENABLED=false             # Orphaned message reclaim
+```
+
+### **Shared Configuration**
+```bash
 # Backends
 EVENTSTORE_TYPE=redis                   # Event streaming backend
 DB_TYPE=redis                           # Database backend
+REDIS_URL=redis://localhost:6379        # Redis connection string
 ```
 
 ## 🛡️ Resilience Features
