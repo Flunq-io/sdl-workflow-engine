@@ -161,18 +161,32 @@ See individual service READMEs for detailed setup instructions.
 
 ## 🎯 Roadmap
 
-- [ ] **Protobuf serialization** - Replace JSON with binary protobuf for performance
-- [ ] **PostgreSQL/MongoDB storage** - Alternative database implementations
-- [ ] **Kafka/RabbitMQ EventStore** - Alternative EventStore backend implementations
-- [x] **SDL Try/Catch task types** - Complete implementation with error filtering and recovery
-- [ ] **Advanced DSL features** - Parallel, switch task types
-- [ ] **REST API endpoints** - Complete CRUD operations for workflows
+### **v0.0.1 - Foundation** ✅ **COMPLETE**
+- [x] **Core DSL parser and validator** - Supports DSL 1.0.0 (YAML) and 0.8 (JSON)
+- [x] **Redis-based event streaming** - CloudEvents compliant with Redis Streams
+- [x] **Advanced workflow execution engine** - Event-driven processing with state rebuilding
+- [x] **EventStore architecture** - Unified interface with pluggable backends
+- [x] **Multi-tenant support** - Tenant isolation across all services
+- [x] **Web UI with event timeline** - Real-time workflow monitoring with I/O data visualization
+- [x] **Event processing resilience** - Consumer groups, retry logic, dead letter queues
+- [x] **SDL Try/Catch Error Handling** - Declarative error handling with sophisticated retry policies
+- [x] **Enterprise-grade resilience** - Circuit breakers, graceful shutdown, concurrency control
+
+### **v0.1.0 - Backend Expansion** 🔄 **NEXT**
+- [ ] **PostgreSQL storage implementation** - Production-ready relational database backend
+- [ ] **Kafka EventStore implementation** - High-throughput event streaming backend
+- [ ] **MongoDB storage implementation** - Document database backend
 - [ ] **Advanced monitoring** - OpenTelemetry, Prometheus, distributed tracing
+- [ ] **Integration test suite** - Comprehensive end-to-end testing
+- [ ] **Performance benchmarks** - Load testing and optimization
+
+### **v0.2.0 - Advanced Features** 🚀 **FUTURE**
+- [ ] **Advanced DSL features** - Parallel, switch task types
+- [ ] **Protobuf serialization** - Binary serialization for performance
 - [ ] **Kubernetes operator** - Native Kubernetes deployment and management
-- [ ] **Workflow versions** - Versioning of workflow definitions in the DSL standard
-- [ ] **SAGA Pattern** - Native SAGA Pattern compensation via DSL standard
-- [ ] **DSL Supported Protocols** - Implement all DSL supported protocols including AsyncAPI, gRPC, OpenAPI, etc. 
-- [x] **DSL Try/Catch** - Complete implementation with custom retry policies and error recovery
+- [ ] **Workflow versions** - Versioning of workflow definitions
+- [ ] **SAGA Pattern** - Native compensation workflows
+- [ ] **DSL Protocol Support** - AsyncAPI, gRPC, OpenAPI protocol implementations
 
 ## 📄 License
 
