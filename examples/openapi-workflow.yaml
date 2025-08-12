@@ -1,0 +1,35 @@
+document:
+  dsl: '1.0.0'
+  namespace: flunq-examples
+  name: openapi-test-workflow
+  version: '1.0.0'
+  description: A workflow to test OpenAPI call tasks
+
+schedule:
+  on:
+    any:
+      - with:
+          type: io.flunq.execution.started
+
+do:
+  - initialize:
+      set:
+        message: "Workflow started with DSL 1.0.0"
+        timestamp: "${ now() }"
+        status: "initialized"
+
+  - findPet:
+      call: openapi
+      with:
+        document: 
+          endpoint: https://petstore.swagger.io/v2/swagger.json
+        operationId: findPetsByStatus
+        parameters:
+          status: available
+          limit: 10
+
+  - finalize:
+      set:
+        final_status: "completed"
+        completion_time: "${ now() }"
+        summary: "OpenAPI workflow completed successfully"

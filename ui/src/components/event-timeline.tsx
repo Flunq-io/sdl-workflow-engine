@@ -3,7 +3,7 @@
 import { WorkflowEvent } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { 
+import {
   Activity,
   Clock,
   Loader2,
@@ -11,9 +11,11 @@ import {
   CheckCircle,
   Play,
   Square,
-
   FileText,
-  Database
+  Database,
+  RotateCcw,
+  Shield,
+  XCircle
 } from 'lucide-react'
 import { formatDatePairCompact } from '@/lib/utils'
 import { useState } from 'react'
@@ -109,6 +111,46 @@ function findTaskPair(event: WorkflowEvent, events: WorkflowEvent[]): WorkflowEv
   }
 
   return null
+}
+
+// Helper function to get all retry attempts for a task
+function getTaskRetryAttempts(taskName: string, events: WorkflowEvent[]): WorkflowEvent[] {
+  return events.filter(e =>
+    e.type.includes('task.completed') &&
+    extractTaskName(e) === taskName
+  ).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+}
+
+// Helper function to extract task success status and error message
+function getTaskCompletionInfo(event: WorkflowEvent): { success: boolean; error?: string; retryCount?: number } {
+  const data = event.data as Record<string, unknown> | undefined
+  const success = data?.success !== false // Default to true for backward compatibility
+  const error = typeof data?.error === 'string' ? data.error : undefined
+
+  // Try to extract retry count from error context or metadata
+  const retryCount = typeof data?.retry_count === 'number' ? data.retry_count : undefined
+
+  return { success, error, retryCount }
+}
+
+// Helper function to extract retry policy from try task configuration
+function extractRetryPolicy(event: WorkflowEvent): { maxAttempts?: number; backoffType?: string } | null {
+  const data = event.data as Record<string, unknown> | undefined
+  const config = data?.config as Record<string, unknown> | undefined
+  const parameters = config?.parameters as Record<string, unknown> | undefined
+  const catchBlock = parameters?.catch as Record<string, unknown> | undefined
+  const retry = catchBlock?.retry as Record<string, unknown> | undefined
+  const limit = retry?.limit as Record<string, unknown> | undefined
+  const attempt = limit?.attempt as Record<string, unknown> | undefined
+  const maxAttempts = typeof attempt?.count === 'number' ? attempt.count : undefined
+
+  // Extract backoff type
+  const backoff = retry?.backoff as Record<string, unknown> | undefined
+  let backoffType = 'constant'
+  if (backoff?.exponential) backoffType = 'exponential'
+  else if (backoff?.linear) backoffType = 'linear'
+
+  return maxAttempts ? { maxAttempts, backoffType } : null
 }
 
 function extractInputData(event: WorkflowEvent): Record<string, JsonValue> | null {
@@ -357,9 +399,27 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                   <div key={`task-pair-${taskName}-${index}`} className="flex gap-4">
                     {/* Timeline line */}
                     <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full ${completedEvent ? 'bg-green-600' : 'bg-yellow-500'} flex items-center justify-center text-white`}>
-                        {completedEvent ? <CheckCircle className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
-                      </div>
+                      {(() => {
+                        if (!completedEvent) {
+                          return (
+                            <div className="w-8 h-8 rounded-full bg-yellow-500 flex items-center justify-center text-white">
+                              <Clock className="h-4 w-4" />
+                            </div>
+                          )
+                        }
+
+                        const completionInfo = getTaskCompletionInfo(completedEvent)
+                        const bgColor = completionInfo.success ? 'bg-green-600' : 'bg-red-600'
+                        const icon = completionInfo.success ?
+                          <CheckCircle className="h-4 w-4" /> :
+                          <XCircle className="h-4 w-4" />
+
+                        return (
+                          <div className={`w-8 h-8 rounded-full ${bgColor} flex items-center justify-center text-white`}>
+                            {icon}
+                          </div>
+                        )
+                      })()}
                       {index < events.length - 1 && (
                         <div className="w-0.5 h-6 bg-border mt-2" />
                       )}
@@ -371,18 +431,72 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-medium text-sm text-blue-700 flex items-center gap-1">
-                              {/* Special icon for wait tasks */}
+                              {/* Special icon for different task types */}
                               {requestedEvent.data?.task_type === 'wait' && (
                                 <Clock className="h-4 w-4 text-orange-500" />
                               )}
+                              {requestedEvent.data?.task_type === 'try' && (
+                                <Shield className="h-4 w-4 text-blue-500" />
+                              )}
                               {t('eventTimeline.task') } {taskName}
                             </h4>
-                            <Badge
-                              variant={completedEvent ? "default" : "secondary"}
-                              className={`text-xs ${completedEvent ? 'bg-green-100 text-green-700 hover:bg-green-200' : ''}`}
-                            >
-                              {completedEvent ? t('eventTimeline.success') : t('status.running')}
-                            </Badge>
+
+                            {/* Task status badge with success/failure indication */}
+                            {(() => {
+                              if (!completedEvent) {
+                                return (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {t('status.running')}
+                                  </Badge>
+                                )
+                              }
+
+                              const completionInfo = getTaskCompletionInfo(completedEvent)
+                              const retryAttempts = taskName ? getTaskRetryAttempts(taskName, events) : []
+                              const currentAttempt = retryAttempts.length
+                              const retryPolicy = extractRetryPolicy(requestedEvent)
+
+                              return (
+                                <>
+                                  <Badge
+                                    variant={completionInfo.success ? "default" : "destructive"}
+                                    className={`text-xs ${
+                                      completionInfo.success
+                                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                    }`}
+                                  >
+                                    {completionInfo.success ? (
+                                      <>
+                                        <CheckCircle className="h-3 w-3 mr-1" />
+                                        {t('eventTimeline.success')}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <XCircle className="h-3 w-3 mr-1" />
+                                        {t('eventTimeline.failed')}
+                                      </>
+                                    )}
+                                  </Badge>
+
+                                  {/* Show retry count if there were multiple attempts */}
+                                  {currentAttempt > 1 && (
+                                    <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
+                                      <RotateCcw className="h-3 w-3 mr-1" />
+                                      Attempt {currentAttempt}
+                                      {retryPolicy?.maxAttempts && ` / ${retryPolicy.maxAttempts}`}
+                                    </Badge>
+                                  )}
+
+                                  {/* Show retry policy info for try tasks */}
+                                  {requestedEvent.data?.task_type === 'try' && retryPolicy && (
+                                    <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">
+                                      Max: {retryPolicy.maxAttempts} ({retryPolicy.backoffType})
+                                    </Badge>
+                                  )}
+                                </>
+                              )
+                            })()}
                             {/* Show wait duration for wait tasks */}
                             {(() => {
                               const rd = requestedEvent.data as Record<string, unknown> | undefined
@@ -418,6 +532,30 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                               </div>
                             )}
                           </div>
+
+                          {/* Error message display for failed tasks */}
+                          {(() => {
+                            if (!completedEvent) return null
+
+                            const completionInfo = getTaskCompletionInfo(completedEvent)
+                            if (completionInfo.success || !completionInfo.error) return null
+
+                            return (
+                              <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                                <div className="flex items-start gap-2">
+                                  <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-xs font-medium text-red-700 mb-1">
+                                      Task Failed
+                                    </div>
+                                    <div className="text-xs text-red-600 break-words">
+                                      {completionInfo.error}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })()}
 
                           {/* Task Input/Output Data */}
                           {(() => {

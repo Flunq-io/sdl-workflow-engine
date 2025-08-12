@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -95,20 +96,39 @@ func (e *WaitTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*Tas
 func (e *WaitTaskExecutor) createErrorResult(task *TaskRequest, startTime time.Time, errorMsg string) (*TaskResult, error) {
 	duration := time.Since(startTime)
 
+	// Create structured workflow error
+	workflowErr := &WorkflowError{
+		Type:     ErrorTypeTimeout,
+		Status:   408, // Request Timeout
+		Title:    "Wait Task Cancelled",
+		Detail:   errorMsg,
+		Instance: fmt.Sprintf("/tasks/%s", task.TaskID),
+		Data: map[string]interface{}{
+			"task_id":   task.TaskID,
+			"task_type": task.TaskType,
+			"duration":  duration.String(),
+		},
+	}
+
 	e.logger.Error("Wait task failed",
 		zap.String("task_id", task.TaskID),
-		zap.String("error", errorMsg),
+		zap.String("error_type", workflowErr.Type),
+		zap.Int("status", workflowErr.Status),
+		zap.String("error", workflowErr.Error()),
 		zap.Duration("duration", duration))
 
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
+		TaskType:    task.TaskType,
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     false,
+		Input:       task.Input,
 		Output:      map[string]interface{}{},
-		Error:       errorMsg,
+		Error:       workflowErr.Error(),
 		Duration:    duration,
-		ExecutedAt:  startTime,
+		StartedAt:   startTime,
+		ExecutedAt:  time.Now(),
 	}, nil
 }

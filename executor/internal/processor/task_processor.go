@@ -18,9 +18,9 @@ import (
 
 // TaskProcessor processes task execution requests with enterprise-grade resilience
 type TaskProcessor struct {
-	eventStream   interfaces.EventStream
-	taskExecutors map[string]executor.TaskExecutor
-	logger        *zap.Logger
+	eventStream      interfaces.EventStream
+	executorRegistry *executor.ExecutorRegistry
+	logger           *zap.Logger
 
 	subscription interfaces.StreamSubscription
 	errorCh      <-chan error
@@ -38,7 +38,6 @@ type TaskProcessor struct {
 // NewTaskProcessor creates a new TaskProcessor with enterprise-grade resilience
 func NewTaskProcessor(
 	eventStream interfaces.EventStream,
-	taskExecutors map[string]executor.TaskExecutor,
 	logger *zap.Logger,
 ) *TaskProcessor {
 	// Determine concurrency from env (default 4)
@@ -48,13 +47,17 @@ func NewTaskProcessor(
 			maxConc = n
 		}
 	}
+
+	// Create executor registry with all SDL-compliant executors
+	executorRegistry := executor.NewExecutorRegistry(logger)
+
 	return &TaskProcessor{
-		eventStream:    eventStream,
-		taskExecutors:  taskExecutors,
-		logger:         logger,
-		stopCh:         make(chan struct{}),
-		maxConcurrency: maxConc,
-		sem:            make(chan struct{}, maxConc),
+		eventStream:      eventStream,
+		executorRegistry: executorRegistry,
+		logger:           logger,
+		stopCh:           make(chan struct{}),
+		maxConcurrency:   maxConc,
+		sem:              make(chan struct{}, maxConc),
 	}
 }
 
@@ -172,76 +175,30 @@ func (p *TaskProcessor) eventProcessingLoop(ctx context.Context) {
 					p.tasksWG.Done()
 				}()
 
-				// Process with retry and ack semantics
-				var lastErr error
-				maxRetries := 3
-				for attempt := 1; attempt <= maxRetries; attempt++ {
-					if err := p.processTaskEvent(ctx, ev); err != nil {
-						lastErr = err
-						p.logger.Error("Failed to process task event, will retry",
-							zap.String("event_id", ev.ID),
-							zap.String("event_type", ev.Type),
-							zap.String("task_id", ev.TaskID),
-							zap.Int("attempt", attempt),
-							zap.Error(err))
-						time.Sleep(time.Duration(attempt) * 200 * time.Millisecond) // simple backoff
-						continue
-					}
-
-					// Success: acknowledge via subscription if possible
-					ackID := ""
-					if key, ok := ev.Extensions["ack_key"].(string); ok {
-						ackID = key
-					} else {
-						if stream, ok1 := ev.Extensions["redis_stream"].(string); ok1 {
-							if msgID, ok2 := ev.Extensions["redis_msg_id"].(string); ok2 {
-								ackID = stream + "|" + msgID
-							}
-						}
-					}
-					if ackID == "" {
-						p.logger.Error("CRITICAL: No ack key available; cannot acknowledge",
-							zap.String("event_id", ev.ID),
-							zap.Any("extensions", ev.Extensions))
-					} else if p.subscription != nil {
-						if err := p.subscription.Acknowledge(ctx, ackID); err != nil {
-							p.logger.Warn("Ack failed",
-								zap.String("event_id", ev.ID),
-								zap.String("ack_id", ackID),
-								zap.Error(err))
-						}
-					}
-					p.logger.Debug("Processed and acked task event",
+				// Process task event (error handling is now done by individual executors)
+				if err := p.processTaskEvent(ctx, ev); err != nil {
+					p.logger.Error("Failed to process task event",
 						zap.String("event_id", ev.ID),
-						zap.String("task_id", ev.TaskID))
+						zap.String("event_type", ev.Type),
+						zap.String("task_id", ev.TaskID),
+						zap.Error(err))
+
+					// Send to DLQ for failed tasks
+					dlqEvent := ev.Clone()
+					dlqEvent.Type = "io.flunq.task.dlq"
+					dlqEvent.AddExtension("reason", fmt.Sprintf("task_execution_failed:%v", err))
+					_ = p.eventStream.Publish(ctx, dlqEvent)
+
+					// Acknowledge the original message to prevent reprocessing
+					p.acknowledgeEvent(ctx, ev)
 					return
 				}
 
-				// After max retries: send to DLQ and log
-				p.logger.Error("Task event failed after max retries; sending to DLQ",
+				// Success: acknowledge the event
+				p.acknowledgeEvent(ctx, ev)
+				p.logger.Debug("Processed and acked task event",
 					zap.String("event_id", ev.ID),
-					zap.String("task_id", ev.TaskID),
-					zap.Error(lastErr))
-
-				// Publish to DLQ using same event with marker
-				dlqEvent := ev.Clone()
-				dlqEvent.Type = "io.flunq.task.dlq"
-				dlqEvent.AddExtension("reason", fmt.Sprintf("max_retries_exceeded:%v", lastErr))
-				_ = p.eventStream.Publish(ctx, dlqEvent)
-
-				// After DLQ publish, acknowledge the original message to prevent it from staying pending
-				if ackKey, ok := ev.Extensions["ack_key"].(string); ok {
-					if p.subscription != nil {
-						if err := p.subscription.Acknowledge(ctx, ackKey); err != nil {
-							p.logger.Warn("Ack after DLQ failed",
-								zap.String("event_id", ev.ID),
-								zap.Error(err))
-						} else {
-							p.logger.Info("Acked message after DLQ",
-								zap.String("event_id", ev.ID))
-						}
-					}
-				}
+					zap.String("task_id", ev.TaskID))
 			}(event)
 		case err := <-errorsCh:
 			if err != nil {
@@ -264,13 +221,13 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 		return fmt.Errorf("failed to parse task request: %w", err)
 	}
 
-	// Find appropriate task executor
-	taskExecutor, exists := p.taskExecutors[taskRequest.TaskType]
+	// Find appropriate task executor from registry
+	taskExecutor, exists := p.executorRegistry.GetExecutor(taskRequest.TaskType)
 	if !exists {
 		return fmt.Errorf("no executor found for task type: %s", taskRequest.TaskType)
 	}
 
-	// Execute the task
+	// Execute the task (error handling and retries are now handled by individual executors)
 	result, err := taskExecutor.Execute(ctx, taskRequest)
 	if err != nil {
 		return fmt.Errorf("task execution failed: %w", err)
@@ -288,6 +245,36 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 		zap.Bool("success", result.Success))
 
 	return nil
+}
+
+// acknowledgeEvent acknowledges an event to prevent reprocessing
+func (p *TaskProcessor) acknowledgeEvent(ctx context.Context, ev *cloudevents.CloudEvent) {
+	ackID := ""
+	if key, ok := ev.Extensions["ack_key"].(string); ok {
+		ackID = key
+	} else {
+		if stream, ok1 := ev.Extensions["redis_stream"].(string); ok1 {
+			if msgID, ok2 := ev.Extensions["redis_msg_id"].(string); ok2 {
+				ackID = stream + "|" + msgID
+			}
+		}
+	}
+
+	if ackID == "" {
+		p.logger.Error("CRITICAL: No ack key available; cannot acknowledge",
+			zap.String("event_id", ev.ID),
+			zap.Any("extensions", ev.Extensions))
+		return
+	}
+
+	if p.subscription != nil {
+		if err := p.subscription.Acknowledge(ctx, ackID); err != nil {
+			p.logger.Warn("Ack failed",
+				zap.String("event_id", ev.ID),
+				zap.String("ack_id", ackID),
+				zap.Error(err))
+		}
+	}
 }
 
 // publishTaskCompletedEvent publishes a task completed event

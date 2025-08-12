@@ -6,6 +6,7 @@ The Executor service handles task execution for the flunq.io workflow engine wit
 
 ### **Task Execution**
 - ✅ **Multiple Task Types**: Supports call, set, wait, inject tasks
+- ✅ **OpenAPI Integration**: Full OpenAPI 3.0 specification support with operation resolution
 - ✅ **HTTP Integration**: External API calls with proper error handling
 - ✅ **Data Processing**: Data transformation and manipulation tasks
 - ✅ **Wait Operations**: Non-blocking delay execution
@@ -66,7 +67,17 @@ Consumer Group → Exponential → Task Logic → Event Stream → Redis Streams
 ## 🎯 Task Types
 
 ### **Call Tasks**
-- Execute HTTP requests to external APIs
+
+#### **OpenAPI Calls**
+- **OpenAPI 3.0 Support**: Full support for OpenAPI 3.0.x specifications
+- **Operation Resolution**: Find operations by `operationId`
+- **Parameter Handling**: Automatic path, query, and header parameter processing
+- **Authentication**: Bearer, Basic, and API Key authentication support
+- **Document Caching**: Automatic caching of OpenAPI documents (5-minute TTL)
+- **Response Processing**: Flexible output formats (content, response, raw)
+
+#### **HTTP Calls (Legacy)**
+- Execute direct HTTP requests to external APIs
 - Support for GET, POST, PUT, DELETE methods
 - Configurable timeouts and retries
 - Response data extraction and transformation
@@ -101,6 +112,75 @@ Consumer Group → Exponential → Task Logic → Event Stream → Redis Streams
 - `REDIS_URL`: Redis connection string
 - `EVENT_STREAM_TYPE`: Event stream backend (redis, kafka, etc.)
 - `LOG_LEVEL`: Logging level
+
+## 🎯 OpenAPI Call Examples
+
+### **Basic OpenAPI Call**
+```json
+{
+  "task_type": "call",
+  "config": {
+    "parameters": {
+      "call_type": "openapi",
+      "document": {
+        "endpoint": "https://petstore.swagger.io/v2/swagger.json"
+      },
+      "operation_id": "findPetsByStatus",
+      "parameters": {
+        "status": "available"
+      }
+    }
+  }
+}
+```
+
+### **OpenAPI Call with Authentication**
+```json
+{
+  "task_type": "call",
+  "config": {
+    "parameters": {
+      "call_type": "openapi",
+      "document": {
+        "endpoint": "https://api.example.com/openapi.json"
+      },
+      "operation_id": "createUser",
+      "parameters": {
+        "body": {
+          "name": "John Doe",
+          "email": "john@example.com"
+        }
+      },
+      "authentication": {
+        "type": "bearer",
+        "config": {
+          "token": "your-jwt-token"
+        }
+      },
+      "output": "content"
+    }
+  }
+}
+```
+
+### **HTTP Call (Backward Compatibility)**
+```json
+{
+  "task_type": "call",
+  "config": {
+    "parameters": {
+      "url": "https://api.example.com/users",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer your-token"
+      },
+      "body": {
+        "name": "John Doe"
+      }
+    }
+  }
+}
+```
 
 ## 🚀 Quick Start
 
@@ -169,8 +249,71 @@ docker run -e REDIS_URL=redis://redis:6379 -e EXECUTOR_CONCURRENCY=8 flunq-execu
 - Health checks for readiness and liveness
 - Resource limits and requests configuration
 
+## 📋 To-Do Tasks & Future Enhancements
+
+### **OpenAPI Call Tasks - Phase 2**
+- [ ] **YAML OpenAPI Support**: Add YAML document parsing alongside JSON
+- [ ] **OAuth2 Authentication**: Implement OAuth2 flow support for advanced authentication
+- [ ] **Schema Validation**: Request/response schema validation against OpenAPI specs
+- [ ] **Advanced Parameter Handling**: Support for complex parameter serialization (arrays, objects)
+- [ ] **Content Type Negotiation**: Support for multiple content types (XML, form-data, etc.)
+- [ ] **Persistent Document Caching**: Redis-based caching for OpenAPI documents across service restarts
+- [ ] **Document Versioning**: Handle OpenAPI document versioning and updates
+- [ ] **Security Schemes**: Support for more complex security schemes (OAuth2 scopes, etc.)
+
+### **Call Task Enhancements**
+- [ ] **gRPC Call Support**: Add support for gRPC service calls
+- [ ] **AsyncAPI Support**: Support for AsyncAPI specifications and event-driven calls
+- [ ] **GraphQL Support**: Add GraphQL query and mutation support
+- [ ] **WebSocket Support**: Support for WebSocket connections and messaging
+- [ ] **File Upload/Download**: Support for multipart file uploads and binary downloads
+- [ ] **Streaming Responses**: Handle streaming HTTP responses
+- [ ] **Custom Headers**: Dynamic header generation and templating
+- [ ] **Request/Response Transformation**: Built-in data transformation capabilities
+
+### **Performance & Reliability**
+- [ ] **Connection Pooling**: HTTP connection pooling for better performance
+- [ ] **Request Retries**: Configurable retry policies with exponential backoff
+- [ ] **Circuit Breaker**: Enhanced circuit breaker with configurable thresholds
+- [ ] **Rate Limiting**: Built-in rate limiting for external API calls
+- [ ] **Timeout Configuration**: Per-operation timeout configuration
+- [ ] **Metrics Collection**: Detailed metrics for OpenAPI operations (latency, success rate, etc.)
+- [ ] **Health Checks**: Health check endpoints for external API dependencies
+- [ ] **Load Balancing**: Support for multiple API endpoints with load balancing
+
+### **Developer Experience**
+- [ ] **OpenAPI Validation**: Validate workflow DSL against OpenAPI specifications
+- [ ] **Auto-completion**: IDE support for OpenAPI operation IDs and parameters
+- [ ] **Documentation Generation**: Auto-generate task documentation from OpenAPI specs
+- [ ] **Testing Framework**: Built-in testing framework for OpenAPI operations
+- [ ] **Mock Server Integration**: Integration with OpenAPI mock servers for testing
+- [ ] **Debug Mode**: Enhanced debugging with request/response logging
+- [ ] **Configuration Validation**: Pre-flight validation of OpenAPI configurations
+- [ ] **Error Mapping**: Map OpenAPI error responses to workflow error handling
+
+### **Security & Compliance**
+- [ ] **Certificate Management**: Custom SSL certificate handling
+- [ ] **API Key Rotation**: Automatic API key rotation support
+- [ ] **Audit Logging**: Detailed audit logs for all external API calls
+- [ ] **Data Masking**: Automatic masking of sensitive data in logs
+- [ ] **Compliance Checks**: Built-in compliance validation (GDPR, SOX, etc.)
+- [ ] **Encryption**: End-to-end encryption for sensitive API calls
+- [ ] **Access Control**: Role-based access control for different API operations
+- [ ] **Vulnerability Scanning**: Automatic scanning of OpenAPI endpoints
+
+### **Integration & Ecosystem**
+- [ ] **Postman Integration**: Import/export Postman collections
+- [ ] **Swagger UI Integration**: Built-in Swagger UI for API exploration
+- [ ] **API Gateway Integration**: Integration with popular API gateways
+- [ ] **Service Mesh Support**: Support for service mesh environments (Istio, Linkerd)
+- [ ] **Kubernetes Integration**: Native Kubernetes service discovery
+- [ ] **Cloud Provider APIs**: Pre-built integrations for AWS, GCP, Azure APIs
+- [ ] **Database Connectors**: Direct database connection support
+- [ ] **Message Queue Integration**: Support for RabbitMQ, Kafka, etc.
+
 ## 🔗 Related Documentation
 
+- [OpenAPI Call Tasks](docs/OPENAPI_CALLS.md) - Detailed OpenAPI call task documentation
 - [Worker Service README](../worker/README.md) - Complete Worker service documentation
 - [Event Store Architecture](../docs/EVENT_STORE_ARCHITECTURE.md) - EventStore design and implementation
 - [Event Processing Quick Reference](../docs/EVENT_PROCESSING_QUICK_REFERENCE.md) - Quick reference guide

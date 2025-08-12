@@ -10,7 +10,6 @@ import (
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 
-	"github.com/flunq-io/executor/internal/executor"
 	"github.com/flunq-io/executor/internal/processor"
 	"github.com/flunq-io/shared/pkg/factory"
 )
@@ -83,18 +82,10 @@ func main() {
 		zapLogger.Fatal("Failed to create EventStream", zap.Error(err))
 	}
 
-	// Initialize task executors
-	taskExecutors := map[string]executor.TaskExecutor{
-		"set":    executor.NewSetTaskExecutor(zapLogger),
-		"call":   executor.NewCallTaskExecutor(zapLogger),
-		"wait":   executor.NewWaitTaskExecutor(zapLogger),
-		"inject": executor.NewInjectTaskExecutor(zapLogger),
-	}
-
-	// Initialize task processor
+	// Initialize task processor with new SDL-compliant executor registry
+	// The registry automatically includes all executors including the new try task executor
 	taskProcessor := processor.NewTaskProcessor(
 		eventStream,
-		taskExecutors,
 		zapLogger,
 	)
 

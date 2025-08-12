@@ -382,14 +382,53 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			}
 		}
 
+		// Extract task success status - CRITICAL for error handling
+		taskSuccess := true // Default to true for backward compatibility
+		if success, exists := eventData["success"].(bool); exists {
+			taskSuccess = success
+		}
+
+		// Extract error message if task failed
+		var errorMessage string
+		if !taskSuccess {
+			if errMsg, exists := eventData["error"].(string); exists {
+				errorMessage = errMsg
+			}
+		}
+
 		e.logger.Debug("Processing task completed event",
 			"event_id", event.ID,
 			"extracted_task_name", taskName,
+			"task_success", taskSuccess,
+			"error_message", errorMessage,
 			"current_completed_tasks", len(state.CompletedTasks),
 			"event_data_keys", getMapKeys(eventData))
 
 		// Debug the full event data structure to understand the nesting
 		debugEventData(e.logger, eventData)
+
+		// If task failed, transition workflow to failed state
+		if !taskSuccess {
+			e.logger.Error("Task failed - transitioning workflow to failed state",
+				"workflow_id", state.WorkflowId,
+				"task_name", taskName,
+				"error", errorMessage)
+
+			state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_FAILED
+
+			// Store error information in workflow variables
+			if state.Variables == nil {
+				state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
+			}
+
+			errorVal, _ := structpb.NewValue(errorMessage)
+			taskNameVal, _ := structpb.NewValue(taskName)
+			state.Variables.Fields["error_message"] = errorVal
+			state.Variables.Fields["failed_task"] = taskNameVal
+
+			state.UpdatedAt = timestamppb.New(event.Time)
+			return nil // Don't process further - workflow has failed
+		}
 
 		// Remove from pending tasks
 		for i, pendingTask := range state.PendingTasks {
@@ -401,14 +440,22 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 
 		// Extract complete TaskData from event
 		var taskData *gen.TaskData
+
+		// Determine task status based on success
+		taskStatus := gen.TaskStatus_TASK_STATUS_COMPLETED
+		if !taskSuccess {
+			taskStatus = gen.TaskStatus_TASK_STATUS_FAILED
+		}
+
 		if taskDataMap, exists := eventData["data"].(map[string]interface{}); exists {
 			// Reconstruct TaskData from event data
 			taskData = &gen.TaskData{
 				Input:  e.mapToStruct(taskDataMap["input"]),
 				Output: e.mapToStruct(taskDataMap["output"]),
 				Metadata: &gen.TaskMetadata{
-					CompletedAt: timestamppb.New(event.Time),
-					Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+					CompletedAt:  timestamppb.New(event.Time),
+					Status:       taskStatus,
+					ErrorMessage: errorMessage, // Store error message in metadata
 				},
 			}
 
@@ -430,8 +477,9 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			// Fallback to minimal TaskData if event doesn't contain full data
 			taskData = &gen.TaskData{
 				Metadata: &gen.TaskMetadata{
-					CompletedAt: timestamppb.New(event.Time),
-					Status:      gen.TaskStatus_TASK_STATUS_COMPLETED,
+					CompletedAt:  timestamppb.New(event.Time),
+					Status:       taskStatus,
+					ErrorMessage: errorMessage, // Store error message in metadata
 				},
 			}
 		}
@@ -827,6 +875,21 @@ func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.Workflo
 									taskInput["set_data"] = evaluatedSetConfig
 								}
 							}
+
+							// Handle call task parameters
+							if callType, hasCall := taskDefMap["call"]; hasCall {
+								e.logger.Debug("Processing call task configuration",
+									"task_name", taskName,
+									"call_type", callType)
+
+								// Extract call configuration
+								callConfig := e.buildCallTaskConfig(taskDefMap, callType, taskName)
+								taskInput["call_config"] = callConfig
+
+								e.logger.Debug("Built call task configuration",
+									"task_name", taskName,
+									"config", callConfig)
+							}
 						}
 						break
 					}
@@ -836,6 +899,88 @@ func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.Workflo
 	}
 
 	return taskInput
+}
+
+// buildCallTaskConfig builds call task configuration from DSL
+func (e *ServerlessWorkflowEngine) buildCallTaskConfig(taskDefMap map[string]interface{}, callType interface{}, taskName string) map[string]interface{} {
+	config := make(map[string]interface{})
+
+	// Determine call type and extract configuration
+	if callTypeStr, ok := callType.(string); ok {
+		config["call_type"] = callTypeStr
+
+		e.logger.Debug("Processing call type", "task_name", taskName, "call_type", callTypeStr)
+
+		switch callTypeStr {
+		case "openapi":
+			// Extract OpenAPI configuration from "with" section
+			if withConfig, hasWith := taskDefMap["with"]; hasWith {
+				if withMap, ok := withConfig.(map[string]interface{}); ok {
+					// Map DSL fields to executor configuration
+					for key, value := range withMap {
+						switch key {
+						case "operationId":
+							// Map camelCase to snake_case
+							config["operation_id"] = value
+						default:
+							// Copy other fields as-is
+							config[key] = value
+						}
+					}
+
+					e.logger.Debug("Extracted OpenAPI configuration",
+						"task_name", taskName,
+						"config_keys", getMapKeys(withMap),
+						"mapped_operation_id", config["operation_id"])
+				}
+			}
+
+		case "http":
+			// Extract HTTP configuration from "with" section
+			if withConfig, hasWith := taskDefMap["with"]; hasWith {
+				if withMap, ok := withConfig.(map[string]interface{}); ok {
+					// Copy all "with" parameters to the config
+					for key, value := range withMap {
+						config[key] = value
+					}
+
+					e.logger.Debug("Extracted HTTP configuration",
+						"task_name", taskName,
+						"config_keys", getMapKeys(withMap))
+				}
+			}
+
+		default:
+			e.logger.Warn("Unknown call type, treating as HTTP",
+				"task_name", taskName,
+				"call_type", callTypeStr)
+
+			// Fallback: treat as HTTP and extract "with" configuration
+			if withConfig, hasWith := taskDefMap["with"]; hasWith {
+				if withMap, ok := withConfig.(map[string]interface{}); ok {
+					for key, value := range withMap {
+						config[key] = value
+					}
+				}
+			}
+		}
+	} else {
+		e.logger.Warn("Call type is not a string, using default HTTP configuration",
+			"task_name", taskName,
+			"call_type", fmt.Sprintf("%T", callType))
+
+		// Fallback: assume HTTP call and extract basic configuration
+		config["call_type"] = "http"
+		if withConfig, hasWith := taskDefMap["with"]; hasWith {
+			if withMap, ok := withConfig.(map[string]interface{}); ok {
+				for key, value := range withMap {
+					config[key] = value
+				}
+			}
+		}
+	}
+
+	return config
 }
 
 // convertISO8601ToGoDuration converts ISO 8601 duration (PT2S) to Go duration (2s)

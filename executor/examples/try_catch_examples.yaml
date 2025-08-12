@@ -1,0 +1,230 @@
+# SDL Error Handling Examples for flunq.io
+
+# Example 1: Basic Try/Catch with Exponential Backoff
+apiCall_with_retry:
+  task_type: try
+  config:
+    parameters:
+      try:
+        callExternalAPI:
+          task_type: call
+          config:
+            parameters:
+              call: http
+              with:
+                method: get
+                endpoint: https://api.example.com/data
+                headers:
+                  Authorization: "Bearer ${.token}"
+      catch:
+        errors:
+          with:
+            type: "https://serverlessworkflow.io/spec/1.0.0/errors/communication"
+            status: 503
+        as: "apiError"
+        retry:
+          delay:
+            seconds: 2
+          backoff:
+            exponential:
+              multiplier: 2.0
+              maxDelay:
+                seconds: 60
+          jitter:
+            from:
+              milliseconds: 100
+            to:
+              milliseconds: 500
+          limit:
+            attempt:
+              count: 5
+            duration:
+              minutes: 10
+
+---
+
+# Example 2: Error Recovery with Notification
+payment_with_recovery:
+  task_type: try
+  config:
+    parameters:
+      try:
+        processPayment:
+          task_type: call
+          config:
+            parameters:
+              call: http
+              with:
+                method: post
+                endpoint: https://payment.service.com/charge
+                body:
+                  amount: "${.order.total}"
+                  currency: "USD"
+                  card_token: "${.payment.token}"
+      catch:
+        errors:
+          with:
+            status: 402  # Payment Required
+        as: "paymentError"
+        do:
+          notifyCustomer:
+            task_type: call
+            config:
+              parameters:
+                call: http
+                with:
+                  method: post
+                  endpoint: https://notification.service.com/send
+                  body:
+                    to: "${.customer.email}"
+                    subject: "Payment Failed"
+                    message: "Your payment failed: ${.paymentError.detail}"
+          logFailure:
+            task_type: call
+            config:
+              parameters:
+                call: http
+                with:
+                  method: post
+                  endpoint: https://logging.service.com/log
+                  body:
+                    level: "error"
+                    message: "Payment processing failed"
+                    error: "${.paymentError}"
+
+---
+
+# Example 3: Conditional Retry with Multiple Error Types
+file_upload_with_conditions:
+  task_type: try
+  config:
+    parameters:
+      try:
+        uploadFile:
+          task_type: call
+          config:
+            parameters:
+              call: http
+              with:
+                method: post
+                endpoint: https://storage.service.com/upload
+                body:
+                  file_data: "${.file.content}"
+                  filename: "${.file.name}"
+      catch:
+        errors:
+          with:
+            type: "https://serverlessworkflow.io/spec/1.0.0/errors/communication"
+        when: ".error.status >= 500 and .error.status != 507"  # Retry server errors except insufficient storage
+        exceptWhen: ".error.detail | contains('rate limit')"   # Don't retry rate limits
+        retry:
+          delay:
+            seconds: 1
+          backoff:
+            linear:
+              increment:
+                seconds: 2
+          limit:
+            attempt:
+              count: 3
+            duration:
+              minutes: 5
+
+---
+
+# Example 4: Nested Try/Catch Blocks
+complex_workflow_with_nested_error_handling:
+  task_type: try
+  config:
+    parameters:
+      try:
+        mainProcess:
+          task_type: try
+          config:
+            parameters:
+              try:
+                fetchUserData:
+                  task_type: call
+                  config:
+                    parameters:
+                      call: http
+                      with:
+                        method: get
+                        endpoint: https://user.service.com/users/${.userId}
+              catch:
+                errors:
+                  with:
+                    status: 404
+                as: "userNotFound"
+                do:
+                  createDefaultUser:
+                    task_type: call
+                    config:
+                      parameters:
+                        call: http
+                        with:
+                          method: post
+                          endpoint: https://user.service.com/users
+                          body:
+                            id: "${.userId}"
+                            name: "Default User"
+      catch:
+        errors:
+          with:
+            type: "https://serverlessworkflow.io/spec/1.0.0/errors/runtime"
+        as: "systemError"
+        do:
+          alertOps:
+            task_type: call
+            config:
+              parameters:
+                call: http
+                with:
+                  method: post
+                  endpoint: https://alerts.service.com/alert
+                  body:
+                    severity: "high"
+                    message: "System error in workflow: ${.systemError.detail}"
+
+---
+
+# Example 5: Comprehensive Error Handling with Jitter
+comprehensive_error_handling:
+  task_type: try
+  config:
+    parameters:
+      try:
+        criticalOperation:
+          task_type: call
+          config:
+            parameters:
+              call: http
+              with:
+                method: post
+                endpoint: https://critical.service.com/process
+                body:
+                  data: "${.input.data}"
+      catch:
+        # Catch any communication or timeout errors
+        errors:
+          with:
+            type: "https://serverlessworkflow.io/spec/1.0.0/errors/(communication|timeout)"
+        when: ".error.status >= 500 or .error.type | contains('timeout')"
+        retry:
+          delay:
+            milliseconds: 500
+          backoff:
+            exponential:
+              multiplier: 1.5
+              maxDelay:
+                seconds: 30
+          jitter:
+            from:
+              milliseconds: 50
+            to:
+              milliseconds: 200
+          limit:
+            attempt:
+              count: 10
+            duration:
+              minutes: 15

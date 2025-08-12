@@ -9,8 +9,8 @@ A modern, cloud-native workflow engine built on the Serverless Workflow Definiti
 │     UI      │ ───────────────────▶ │    API      │───┐   ┌──▶│   Worker    │◀──┐   ┌──▶│  Executor   │
 │   Service   │                      │   Service   │   │   │   │   Service   │   │   │   │  Service    │
 └─────────────┘                      └─────────────┘   │   │   └─────────────┘   │   │   └─────────────┘
-                                                       │   │          ▲          │   │
-                                                       ▼   ▼          │          ▼   ▼
+                                                       │   │         ▲           │   │
+                                                       ▼   ▼         │           ▼   ▼
                                              ┌────────────────┐      │   ┌──────────────────┐
                                              │ Shared Event   │◀─────┘   │ Shared Database  │
                                              │ Stream (Redis) │          │ (Redis -> pluggable)
@@ -54,11 +54,14 @@ Backends are selected via env and factories:
 - **Language**: Go
 - **Purpose**: External API integration and task execution with enterprise-grade resilience
 - **Features**:
-  - **Task Execution**: HTTP calls, data manipulation, wait task handling
+  - **Task Execution**: HTTP calls, data manipulation, wait task handling, SDL try/catch blocks
   - **Event Processing**: Consumer groups, retry logic, dead letter queues
   - **Resilience**: Message acknowledgment, orphaned message recovery
   - **Concurrency**: Configurable task concurrency with semaphore control
-  - **Error Handling**: Exponential backoff, circuit breakers, rate limiting
+  - **SDL Error Handling**: Declarative try/catch blocks with sophisticated retry policies
+  - **Error Recovery**: Execute specific tasks when errors are caught
+  - **Backoff Strategies**: Constant, linear, exponential backoff with jitter support
+  - **Error Filtering**: Pattern matching for error types, status codes, and custom properties
 
 ### **Timer Service** (`/timer`)
 - **Language**: Go
@@ -151,16 +154,25 @@ See individual service READMEs for detailed setup instructions.
 - [x] **Enhanced executor service** - Resilient task execution with retry logic and acknowledgment
 - [x] **Enhanced timer service** - Enterprise-grade timer scheduling with consumer groups
 - [x] **Unified resilience patterns** - Consistent error handling across Worker, Executor, and Timer services
+- [x] **SDL Try/Catch Error Handling** - Declarative error handling with sophisticated retry policies
+- [x] **Task and Workflow Status Tracking** - Proper status updates for failed tasks and workflows
+- [x] **Error Recovery System** - Execute specific tasks when errors are caught
+- [x] **Advanced Retry Policies** - Multiple backoff strategies with jitter and conditional logic
 
 ## 🎯 Roadmap
 
 - [ ] **Protobuf serialization** - Replace JSON with binary protobuf for performance
 - [ ] **PostgreSQL/MongoDB storage** - Alternative database implementations
 - [ ] **Kafka/RabbitMQ EventStore** - Alternative EventStore backend implementations
-- [ ] **Advanced DSL features** - Parallel, switch, try/catch task types
+- [x] **SDL Try/Catch task types** - Complete implementation with error filtering and recovery
+- [ ] **Advanced DSL features** - Parallel, switch task types
 - [ ] **REST API endpoints** - Complete CRUD operations for workflows
 - [ ] **Advanced monitoring** - OpenTelemetry, Prometheus, distributed tracing
 - [ ] **Kubernetes operator** - Native Kubernetes deployment and management
+- [ ] **Workflow versions** - Versioning of workflow definitions in the DSL standard
+- [ ] **SAGA Pattern** - Native SAGA Pattern compensation via DSL standard
+- [ ] **DSL Supported Protocols** - Implement all DSL supported protocols including AsyncAPI, gRPC, OpenAPI, etc. 
+- [x] **DSL Try/Catch** - Complete implementation with custom retry policies and error recovery
 
 ## 📄 License
 

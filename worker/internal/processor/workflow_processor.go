@@ -706,9 +706,24 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			}
 		}
 
-		// Pass through other input data
+		// For call tasks, extract call configuration
+		if task.TaskType == "call" {
+			if callConfig, exists := inputMap["call_config"]; exists {
+				// Merge call configuration into parameters
+				if callConfigMap, ok := callConfig.(map[string]interface{}); ok {
+					for key, value := range callConfigMap {
+						parameters[key] = value
+					}
+					p.logger.Debug("Extracted call task configuration",
+						"task_name", task.Name,
+						"config_keys", getMapKeys(callConfigMap))
+				}
+			}
+		}
+
+		// Pass through other input data (excluding processed keys)
 		for key, value := range inputMap {
-			if key != "set_data" {
+			if key != "set_data" && key != "call_config" {
 				inputData[key] = value
 			}
 		}
@@ -971,4 +986,13 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 		"task_type", nextTask.TaskType)
 
 	return nil
+}
+
+// getMapKeys returns the keys of a map for debugging purposes
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
