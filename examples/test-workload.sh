@@ -2,8 +2,8 @@
 
 # Configuration
 API_URL="http://localhost:8080/api/v1/acme-inc/workflows/wf_57135251-a1a4-46/execute"
-ITERATIONS=50  # Default number of iterations
-DELAY=0.1      # Default delay between requests in seconds
+ITERATIONS=100  # Default number of iterations
+DELAY=0.1     # Default delay between requests in seconds
 PARALLEL=false # Run requests in parallel or sequential
 MAX_PARALLEL=10 # Maximum number of parallel requests
 

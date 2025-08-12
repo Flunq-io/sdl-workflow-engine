@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/flunq-io/executor/internal/processor"
 	"github.com/flunq-io/shared/pkg/factory"
@@ -46,12 +47,25 @@ func (l *LoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
 }
 
 func main() {
-	// Initialize logger
-	zapLogger, _ := zap.NewDevelopment()
-	defer zapLogger.Sync()
-
-	// Load configuration
+	// Load configuration first
 	config := loadConfig()
+
+	// Initialize logger with proper level
+	var zapLogger *zap.Logger
+	var err error
+
+	if config.LogLevel == "debug" {
+		zapLogger, err = zap.NewDevelopment()
+	} else {
+		zapConfig := zap.NewProductionConfig()
+		zapConfig.Level = zap.NewAtomicLevelAt(parseLogLevel(config.LogLevel))
+		zapLogger, err = zapConfig.Build()
+	}
+
+	if err != nil {
+		panic(err)
+	}
+	defer zapLogger.Sync()
 
 	zapLogger.Info("Starting Executor Service",
 		zap.String("version", "1.0.0"),
@@ -145,4 +159,20 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// parseLogLevel converts string log level to zapcore.Level
+func parseLogLevel(level string) zapcore.Level {
+	switch level {
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	case "warn":
+		return zapcore.WarnLevel
+	case "error":
+		return zapcore.ErrorLevel
+	default:
+		return zapcore.InfoLevel
+	}
 }

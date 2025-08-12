@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  Tool,
+} from '@modelcontextprotocol/sdk/types.js';
+import { FlunqApiClient } from './flunq-client.js';
+import { WorkflowDiscoveryService } from './workflow-discovery.js';
+import { SchemaGenerator } from './schema-generator.js';
+import { ExecutionManager } from './execution-manager.js';
+import { Logger } from './logger.js';
+import { Config } from './config.js';
+
+class FlunqMcpServer {
+  private server: Server;
+  private flunqClient: FlunqApiClient;
+  private discoveryService: WorkflowDiscoveryService;
+  private schemaGenerator: SchemaGenerator;
+  private executionManager: ExecutionManager;
+  private logger: Logger;
+  private config: Config;
+
+  constructor() {
+    this.config = new Config();
+    this.logger = new Logger();
+    this.flunqClient = new FlunqApiClient(this.config, this.logger);
+    this.schemaGenerator = new SchemaGenerator(this.logger);
+    this.discoveryService = new WorkflowDiscoveryService(
+      this.flunqClient,
+      this.schemaGenerator,
+      this.logger
+    );
+    this.executionManager = new ExecutionManager(
+      this.flunqClient,
+      this.logger,
+      this.config
+    );
+
+    this.server = new Server(
+      {
+        name: 'flunq-mcp-server',
+        version: '0.1.0',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+
+    this.setupHandlers();
+  }
+
+  private setupHandlers(): void {
+    // List available workflow tools
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      try {
+        this.logger.info('Discovering workflows...');
+        const workflows = await this.discoveryService.discoverWorkflows();
+        
+        const tools: Tool[] = workflows.map(workflow => ({
+          name: `workflow_${workflow.id}`,
+          description: workflow.description || `Execute ${workflow.name} workflow`,
+          inputSchema: workflow.inputSchema,
+        }));
+
+        // Add a refresh tool
+        tools.push({
+          name: 'refresh_workflows',
+          description: 'Refresh the workflow cache to discover new workflows',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false,
+          },
+        });
+
+        this.logger.info(`Discovered ${tools.length} workflow tools`);
+        return { tools };
+      } catch (error) {
+        this.logger.error('Failed to discover workflows:', error);
+        return { tools: [] };
+      }
+    });
+
+    // Execute workflow tool
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      try {
+        this.logger.info(`Executing tool: ${name}`, { args });
+
+        // Handle refresh tool
+        if (name === 'refresh_workflows') {
+          this.discoveryService.clearCache();
+          const workflows = await this.discoveryService.discoverWorkflows();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Workflow cache refreshed. Found ${workflows.length} workflows.`,
+              },
+            ],
+          };
+        }
+
+        // Extract workflow ID from tool name
+        const workflowId = name.replace(/^workflow_/, '');
+
+        // Find the workflow by ID
+        const workflows = await this.discoveryService.discoverWorkflows();
+        const workflow = workflows.find(w => w.id === workflowId);
+
+        if (!workflow) {
+          throw new Error(`Workflow not found: ${workflowId}`);
+        }
+
+        // Validate input against schema
+        if (workflow.inputSchema) {
+          this.schemaGenerator.validateInput(args || {}, workflow.inputSchema);
+        }
+
+        // Execute workflow
+        const result = await this.executionManager.executeWorkflow(
+          workflow.id,
+          args || {}
+        );
+
+        this.logger.info(`Tool execution completed: ${name}`, { result });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        this.logger.error(`Tool execution failed: ${name}`, error);
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error executing workflow: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    });
+  }
+
+  async start(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    this.logger.info('Flunq MCP Server started');
+  }
+}
+
+// Start the server
+const server = new FlunqMcpServer();
+server.start().catch((error) => {
+  console.error('Failed to start MCP server:', error);
+  process.exit(1);
+});
