@@ -67,13 +67,74 @@ class FlunqMcpServer {
           inputSchema: workflow.inputSchema,
         }));
 
-        // Add a refresh tool
+        // Add utility tools
         tools.push({
           name: 'refresh_workflows',
           description: 'Refresh the workflow cache to discover new workflows',
           inputSchema: {
             type: 'object',
             properties: {},
+            additionalProperties: false,
+          },
+        });
+
+        tools.push({
+          name: 'list_workflows',
+          description: 'List workflows with filtering and pagination options',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              page: {
+                type: 'number',
+                description: 'Page number (1-based)',
+                minimum: 1,
+              },
+              size: {
+                type: 'number',
+                description: 'Number of items per page',
+                minimum: 1,
+                maximum: 100,
+              },
+              sort_by: {
+                type: 'string',
+                description: 'Field to sort by',
+                enum: ['name', 'created_at', 'updated_at', 'state'],
+              },
+              sort_order: {
+                type: 'string',
+                description: 'Sort order',
+                enum: ['asc', 'desc'],
+              },
+              status: {
+                type: 'string',
+                description: 'Filter by workflow status',
+                enum: ['active', 'inactive', 'created'],
+              },
+              name: {
+                type: 'string',
+                description: 'Filter by workflow name (partial match)',
+              },
+              description: {
+                type: 'string',
+                description: 'Filter by workflow description (partial match)',
+              },
+              tags: {
+                type: 'string',
+                description: 'Filter by tags (comma-separated)',
+              },
+              search: {
+                type: 'string',
+                description: 'Search across workflow name, description, and tags',
+              },
+              created_at: {
+                type: 'string',
+                description: 'Filter by creation date range (format: "2024-01-01,2024-12-31")',
+              },
+              updated_at: {
+                type: 'string',
+                description: 'Filter by update date range (format: "2024-01-01,2024-12-31")',
+              },
+            },
             additionalProperties: false,
           },
         });
@@ -102,6 +163,19 @@ class FlunqMcpServer {
               {
                 type: 'text',
                 text: `Workflow cache refreshed. Found ${workflows.length} workflows.`,
+              },
+            ],
+          };
+        }
+
+        // Handle list workflows tool
+        if (name === 'list_workflows') {
+          const response = await this.discoveryService.listWorkflowsWithPagination(args);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };

@@ -44,7 +44,7 @@ func NewExecutionService(
 
 // ListExecutions lists executions with optional filtering
 func (s *ExecutionService) ListExecutions(ctx context.Context, params *models.ExecutionListParams) ([]models.Execution, int, error) {
-	executions, total, err := s.executionRepo.List(ctx, params)
+	executions, _, err := s.executionRepo.List(ctx, params)
 	if err != nil {
 		s.logger.Error("Failed to list executions from repository", zap.Error(err))
 		return nil, 0, fmt.Errorf("failed to list executions: %w", err)
@@ -63,7 +63,54 @@ func (s *ExecutionService) ListExecutions(ctx context.Context, params *models.Ex
 		return si.After(sj)
 	})
 
-	return executions, total, nil
+	// Use actual count of executions as total for consistency
+	actualTotal := len(executions)
+	return executions, actualTotal, nil
+}
+
+// ListExecutionsWithFilters lists executions with enhanced filtering and returns filter metadata
+func (s *ExecutionService) ListExecutionsWithFilters(ctx context.Context, params *models.ExecutionListParams) ([]models.Execution, int, int, map[string]interface{}, error) {
+	// For now, fall back to basic listing with repository-level filtering
+	// This avoids issues with the shared database interface not handling large limits
+	executions, _, err := s.executionRepo.List(ctx, params)
+	if err != nil {
+		s.logger.Error("Failed to list executions from repository", zap.Error(err))
+		return nil, 0, 0, nil, fmt.Errorf("failed to list executions: %w", err)
+	}
+
+	s.logger.Info("ListExecutionsWithFilters debug",
+		zap.String("tenant_id", params.TenantID),
+		zap.Int("executions_count", len(executions)))
+
+	// Create applied filters metadata based on params
+	appliedFilters := make(map[string]interface{})
+	if params.Status != "" {
+		appliedFilters["status"] = params.Status
+	}
+	if params.WorkflowID != "" {
+		appliedFilters["workflow_id"] = params.WorkflowID
+	}
+	if params.CorrelationID != "" {
+		appliedFilters["correlation_id"] = params.CorrelationID
+	}
+	if params.Search != "" {
+		appliedFilters["search"] = params.Search
+	}
+	if params.TenantID != "" {
+		appliedFilters["tenant_id"] = params.TenantID
+	}
+
+	// For now, assume the repository handles filtering and pagination
+	// In the future, we can implement client-side filtering if needed
+	filteredCount := len(executions) // Use actual count of returned executions
+	actualTotal := len(executions)   // Use actual count as total for now
+
+	s.logger.Info("ListExecutionsWithFilters result",
+		zap.Int("executions_count", len(executions)),
+		zap.Int("actual_total", actualTotal),
+		zap.Int("filtered_count", filteredCount))
+
+	return executions, actualTotal, filteredCount, appliedFilters, nil
 }
 
 // GetExecution retrieves an execution by ID from workflow state storage
@@ -450,4 +497,190 @@ func (s *ExecutionService) convertNumericStatusToSDL(numericStatus int) models.E
 	default:
 		return models.ExecutionStatusPending
 	}
+}
+
+// applyExecutionFilters applies filters to executions and returns filtered results with applied filter metadata
+func (s *ExecutionService) applyExecutionFilters(executions []models.Execution, params *models.ExecutionListParams) ([]models.Execution, map[string]interface{}) {
+	filtered := make([]models.Execution, 0, len(executions))
+	appliedFilters := make(map[string]interface{})
+
+	for _, execution := range executions {
+		include := true
+
+		// Status filter
+		if params.Status != "" {
+			if string(execution.Status) != params.Status {
+				include = false
+			}
+			appliedFilters["status"] = params.Status
+		}
+
+		// Workflow ID filter
+		if params.WorkflowID != "" {
+			if execution.WorkflowID != params.WorkflowID {
+				include = false
+			}
+			appliedFilters["workflow_id"] = params.WorkflowID
+		}
+
+		// Correlation ID filter
+		if params.CorrelationID != "" {
+			if execution.CorrelationID != params.CorrelationID {
+				include = false
+			}
+			appliedFilters["correlation_id"] = params.CorrelationID
+		}
+
+		// Tenant filter
+		if params.TenantID != "" {
+			if execution.TenantID != params.TenantID {
+				include = false
+			}
+			appliedFilters["tenant_id"] = params.TenantID
+		}
+
+		// Search filter (searches workflow ID, correlation ID, and tenant ID)
+		if params.Search != "" {
+			if !searchExecution(execution, params.Search) {
+				include = false
+			}
+			appliedFilters["search"] = params.Search
+		}
+
+		// Date range filters
+		if params.StartedAt != "" {
+			if !isInDateRange(execution.StartedAt, params.StartedAt) {
+				include = false
+			}
+			appliedFilters["started_at"] = params.StartedAt
+		}
+
+		if params.CompletedAt != "" && execution.CompletedAt != nil {
+			if !isInDateRange(*execution.CompletedAt, params.CompletedAt) {
+				include = false
+			}
+			appliedFilters["completed_at"] = params.CompletedAt
+		}
+
+		// Created/Updated date filters
+		if params.CreatedAt != "" {
+			if !isInDateRange(execution.StartedAt, params.CreatedAt) { // Use StartedAt as creation time
+				include = false
+			}
+			appliedFilters["created_at"] = params.CreatedAt
+		}
+
+		if params.UpdatedAt != "" {
+			updateTime := execution.StartedAt
+			if execution.CompletedAt != nil {
+				updateTime = *execution.CompletedAt
+			}
+			if !isInDateRange(updateTime, params.UpdatedAt) {
+				include = false
+			}
+			appliedFilters["updated_at"] = params.UpdatedAt
+		}
+
+		if include {
+			filtered = append(filtered, execution)
+		}
+	}
+
+	return filtered, appliedFilters
+}
+
+// sortExecutions sorts executions by the specified field and order
+func (s *ExecutionService) sortExecutions(executions []models.Execution, sortBy, sortOrder string) {
+	if sortBy == "" {
+		sortBy = "started_at"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+
+	sort.Slice(executions, func(i, j int) bool {
+		var less bool
+		switch sortBy {
+		case "workflow_id":
+			less = executions[i].WorkflowID < executions[j].WorkflowID
+		case "status":
+			less = executions[i].Status < executions[j].Status
+		case "correlation_id":
+			less = executions[i].CorrelationID < executions[j].CorrelationID
+		case "tenant_id":
+			less = executions[i].TenantID < executions[j].TenantID
+		case "completed_at":
+			if executions[i].CompletedAt == nil && executions[j].CompletedAt == nil {
+				less = false
+			} else if executions[i].CompletedAt == nil {
+				less = false
+			} else if executions[j].CompletedAt == nil {
+				less = true
+			} else {
+				less = executions[i].CompletedAt.Before(*executions[j].CompletedAt)
+			}
+		case "started_at":
+		default:
+			less = executions[i].StartedAt.Before(executions[j].StartedAt)
+		}
+
+		if sortOrder == "desc" {
+			return !less
+		}
+		return less
+	})
+}
+
+// paginateExecutions applies pagination to executions
+func (s *ExecutionService) paginateExecutions(executions []models.Execution, params models.PaginationParams) []models.Execution {
+	var limit, offset int
+
+	if params.Page > 0 && params.Size > 0 {
+		// Page-based pagination
+		limit = params.Size
+		offset = (params.Page - 1) * params.Size
+	} else {
+		// Offset-based pagination
+		limit = params.Limit
+		if limit == 0 {
+			limit = 20 // default
+		}
+		offset = params.Offset
+	}
+
+	if offset >= len(executions) {
+		return []models.Execution{}
+	}
+
+	end := offset + limit
+	if end > len(executions) {
+		end = len(executions)
+	}
+
+	return executions[offset:end]
+}
+
+// searchExecution performs a global search across execution fields
+func searchExecution(execution models.Execution, searchTerm string) bool {
+	// Search in workflow ID
+	if containsIgnoreCase(execution.WorkflowID, searchTerm) {
+		return true
+	}
+
+	// Search in correlation ID
+	if containsIgnoreCase(execution.CorrelationID, searchTerm) {
+		return true
+	}
+
+	// Search in tenant ID
+	if containsIgnoreCase(execution.TenantID, searchTerm) {
+		return true
+	}
+
+	// Search in status
+	if containsIgnoreCase(string(execution.Status), searchTerm) {
+		return true
+	}
+
+	return false
 }

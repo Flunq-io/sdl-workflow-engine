@@ -77,6 +77,12 @@ func (e *Evaluator) evaluateBuiltinFunction(jqPath string, data map[string]inter
 		return e.extractFromPath(data, fieldPath)
 	}
 
+	// Handle .* expressions (standard JQ syntax for current object)
+	if strings.HasPrefix(jqPath, ".") {
+		fieldPath := strings.TrimPrefix(jqPath, ".")
+		return e.extractFromPath(data, fieldPath)
+	}
+
 	// Handle simple field access (no prefix)
 	if !strings.Contains(jqPath, ".") && !strings.Contains(jqPath, "(") {
 		if value, exists := data[jqPath]; exists {

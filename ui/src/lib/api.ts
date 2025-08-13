@@ -55,7 +55,36 @@ export interface ApiResponse<T> {
   }
 }
 
+export interface PaginationMeta {
+  total: number
+  limit: number
+  offset: number
+  page: number
+  size: number
+  total_pages: number
+  has_next: boolean
+  has_previous: boolean
+}
+
+export interface FilterMeta {
+  applied: { [key: string]: any }
+  count: number
+}
+
+export interface SortMeta {
+  field: string
+  order: string
+}
+
 export interface PaginatedResponse<T> {
+  items: T[]
+  pagination: PaginationMeta
+  filters: FilterMeta
+  sort?: SortMeta
+}
+
+// Legacy interface for backward compatibility
+export interface LegacyPaginatedResponse<T> {
   items: T[]
   total: number
   limit: number
@@ -133,11 +162,42 @@ class ApiClient {
   }
 
   // Workflow endpoints
-  async getWorkflows(params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<Workflow>> {
+  async getWorkflows(params?: {
+    limit?: number
+    offset?: number
+    page?: number
+    size?: number
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+    status?: string
+    name?: string
+    description?: string
+    tags?: string
+    search?: string
+    created_at?: string
+    updated_at?: string
+  }): Promise<PaginatedResponse<Workflow>> {
     const searchParams = new URLSearchParams()
+
+    // Pagination
     if (params?.limit) searchParams.set('limit', params.limit.toString())
     if (params?.offset) searchParams.set('offset', params.offset.toString())
-    
+    if (params?.page) searchParams.set('page', params.page.toString())
+    if (params?.size) searchParams.set('size', params.size.toString())
+
+    // Sorting
+    if (params?.sort_by) searchParams.set('sort_by', params.sort_by)
+    if (params?.sort_order) searchParams.set('sort_order', params.sort_order)
+
+    // Filtering
+    if (params?.status) searchParams.set('status', params.status)
+    if (params?.name) searchParams.set('name', params.name)
+    if (params?.description) searchParams.set('description', params.description)
+    if (params?.tags) searchParams.set('tags', params.tags)
+    if (params?.search) searchParams.set('search', params.search)
+    if (params?.created_at) searchParams.set('created_at', params.created_at)
+    if (params?.updated_at) searchParams.set('updated_at', params.updated_at)
+
     const query = searchParams.toString()
     return this.request(`/workflows${query ? `?${query}` : ''}`)
   }
@@ -169,12 +229,44 @@ class ApiClient {
   }
 
   // Execution endpoints
-  async getExecutions(params?: { limit?: number; offset?: number; workflow_id?: string }): Promise<PaginatedResponse<Execution>> {
+  async getExecutions(params?: {
+    limit?: number
+    offset?: number
+    page?: number
+    size?: number
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
+    workflow_id?: string
+    status?: string
+    correlation_id?: string
+    search?: string
+    started_at?: string
+    completed_at?: string
+    created_at?: string
+    updated_at?: string
+  }): Promise<PaginatedResponse<Execution>> {
     const searchParams = new URLSearchParams()
+
+    // Pagination
     if (params?.limit) searchParams.set('limit', params.limit.toString())
     if (params?.offset) searchParams.set('offset', params.offset.toString())
+    if (params?.page) searchParams.set('page', params.page.toString())
+    if (params?.size) searchParams.set('size', params.size.toString())
+
+    // Sorting
+    if (params?.sort_by) searchParams.set('sort_by', params.sort_by)
+    if (params?.sort_order) searchParams.set('sort_order', params.sort_order)
+
+    // Filtering
     if (params?.workflow_id) searchParams.set('workflow_id', params.workflow_id)
-    
+    if (params?.status) searchParams.set('status', params.status)
+    if (params?.correlation_id) searchParams.set('correlation_id', params.correlation_id)
+    if (params?.search) searchParams.set('search', params.search)
+    if (params?.started_at) searchParams.set('started_at', params.started_at)
+    if (params?.completed_at) searchParams.set('completed_at', params.completed_at)
+    if (params?.created_at) searchParams.set('created_at', params.created_at)
+    if (params?.updated_at) searchParams.set('updated_at', params.updated_at)
+
     const query = searchParams.toString()
     return this.request(`/executions${query ? `?${query}` : ''}`)
   }

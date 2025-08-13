@@ -60,10 +60,10 @@ type ExecutionResponse struct {
 
 // ExecutionListResponse represents the response for listing executions
 type ExecutionListResponse struct {
-	Items  []ExecutionResponse `json:"items"`
-	Total  int                 `json:"total"`
-	Limit  int                 `json:"limit"`
-	Offset int                 `json:"offset"`
+	Items      []ExecutionResponse `json:"items"`
+	Pagination PaginationMeta      `json:"pagination"`
+	Filters    FilterMeta          `json:"filters"`
+	Sort       *SortMeta           `json:"sort,omitempty"`
 }
 
 // CancelExecutionRequest represents the request to cancel an execution

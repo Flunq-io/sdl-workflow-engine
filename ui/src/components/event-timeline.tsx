@@ -1,8 +1,10 @@
 'use client'
 
+import { useState } from 'react'
 import { WorkflowEvent } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Activity,
   Clock,
@@ -15,10 +17,48 @@ import {
   Database,
   RotateCcw,
   Shield,
-  XCircle
+  XCircle,
+  Copy,
+  Check
 } from 'lucide-react'
 import { formatDatePairCompact } from '@/lib/utils'
-import { useState } from 'react'
+
+// Copy button component
+function CopyButton({ data, label = "Copy JSON" }: { data: any, label?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleCopy}
+      className="h-6 px-2 text-xs"
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3 mr-1" />
+          Copied!
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3 mr-1" />
+          {label}
+        </>
+      )}
+    </Button>
+  )
+}
+
 import { useTranslations } from 'next-intl'
 
 interface EventTimelineProps {
@@ -202,7 +242,15 @@ function extractOutputData(event: WorkflowEvent): Record<string, JsonValue> | nu
 
   // For workflow completion events
   if (event.type.includes('workflow.completed') && event.data.output) {
-    return event.data.output as Record<string, JsonValue>
+    const output = event.data.output as Record<string, JsonValue>
+
+    // If there's a transformed 'result' field, show only that
+    if (output.result !== undefined) {
+      return { result: output.result }
+    }
+
+    // Otherwise, return the full output
+    return output
   }
 
   // For task completion events - extract meaningful business data
@@ -232,7 +280,17 @@ function extractOutputData(event: WorkflowEvent): Record<string, JsonValue> | nu
 
     // Final fallbacks
     if (Object.prototype.hasOwnProperty.call(event.data as Record<string, unknown>, 'output_data')) return (event.data as Record<string, JsonValue>)['output_data'] as Record<string, JsonValue>
-    if (event.data.output) return event.data.output as Record<string, JsonValue>
+    if (event.data.output) {
+      const output = event.data.output as Record<string, JsonValue>
+
+      // If there's a transformed 'result' field, show only that
+      if (output.result !== undefined) {
+        return { result: output.result }
+      }
+
+      // Otherwise, return the full output
+      return output
+    }
   }
 
   return null
@@ -323,6 +381,10 @@ function DataDisplay({ title, data, variant = 'default' }: DataDisplayProps) {
       {isExpanded && (
         <div className="px-3 pb-3">
           <div className="bg-white rounded border p-2">
+            <div className="flex justify-between items-start mb-2">
+              <span className="text-xs font-medium text-gray-600">JSON Data</span>
+              <CopyButton data={data} />
+            </div>
             <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
               {JSON.stringify(data, null, 2)}
             </pre>
@@ -659,6 +721,10 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
                             {t('eventTimeline.viewEventData')}
                           </summary>
                           <div className="mt-2 p-3 bg-muted rounded-md">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-xs font-medium text-muted-foreground">Event Data</span>
+                              <CopyButton data={event.data} label="Copy" />
+                            </div>
                             <pre className="text-xs overflow-x-auto">
                               {JSON.stringify(event.data, null, 2)}
                             </pre>

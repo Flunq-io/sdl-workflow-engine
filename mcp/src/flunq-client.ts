@@ -14,6 +14,48 @@ export interface Workflow {
   updated_at: string;
 }
 
+export interface PaginationMeta {
+  total: number;
+  limit: number;
+  offset: number;
+  page: number;
+  size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
+export interface FilterMeta {
+  applied: { [key: string]: any };
+  count: number;
+}
+
+export interface SortMeta {
+  field: string;
+  order: string;
+}
+
+export interface WorkflowListResponse {
+  items: Workflow[];
+  pagination: PaginationMeta;
+  filters: FilterMeta;
+  sort?: SortMeta;
+}
+
+export interface WorkflowListParams {
+  page?: number;
+  size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  status?: string;
+  name?: string;
+  description?: string;
+  tags?: string;
+  search?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Execution {
   id: string;
   workflow_id: string;
@@ -85,11 +127,60 @@ export class FlunqApiClient {
     );
   }
 
-  async listWorkflows(tenantId?: string): Promise<Workflow[]> {
+  async listWorkflows(tenantId?: string, params?: WorkflowListParams): Promise<Workflow[]> {
     const tenant = tenantId || this.config.defaultTenant;
-    const response = await this.client.get(`/api/v1/${tenant}/workflows`);
-    // API returns {items: [...], total: number, ...}
-    return response.data.items || [];
+
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+    if (params) {
+      if (params.page) queryParams.set('page', params.page.toString());
+      if (params.size) queryParams.set('size', params.size.toString());
+      if (params.sort_by) queryParams.set('sort_by', params.sort_by);
+      if (params.sort_order) queryParams.set('sort_order', params.sort_order);
+      if (params.status) queryParams.set('status', params.status);
+      if (params.name) queryParams.set('name', params.name);
+      if (params.description) queryParams.set('description', params.description);
+      if (params.tags) queryParams.set('tags', params.tags);
+      if (params.search) queryParams.set('search', params.search);
+      if (params.created_at) queryParams.set('created_at', params.created_at);
+      if (params.updated_at) queryParams.set('updated_at', params.updated_at);
+    }
+
+    const url = `/api/v1/${tenant}/workflows${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    const response = await this.client.get(url);
+
+    // Handle both old and new API response formats
+    if (response.data.items) {
+      return response.data.items;
+    }
+
+    // Fallback for legacy format
+    return response.data || [];
+  }
+
+  async listWorkflowsWithPagination(tenantId?: string, params?: WorkflowListParams): Promise<WorkflowListResponse> {
+    const tenant = tenantId || this.config.defaultTenant;
+
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+    if (params) {
+      if (params.page) queryParams.set('page', params.page.toString());
+      if (params.size) queryParams.set('size', params.size.toString());
+      if (params.sort_by) queryParams.set('sort_by', params.sort_by);
+      if (params.sort_order) queryParams.set('sort_order', params.sort_order);
+      if (params.status) queryParams.set('status', params.status);
+      if (params.name) queryParams.set('name', params.name);
+      if (params.description) queryParams.set('description', params.description);
+      if (params.tags) queryParams.set('tags', params.tags);
+      if (params.search) queryParams.set('search', params.search);
+      if (params.created_at) queryParams.set('created_at', params.created_at);
+      if (params.updated_at) queryParams.set('updated_at', params.updated_at);
+    }
+
+    const url = `/api/v1/${tenant}/workflows${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    const response = await this.client.get(url);
+
+    return response.data;
   }
 
   async getWorkflow(workflowId: string, tenantId?: string): Promise<Workflow> {

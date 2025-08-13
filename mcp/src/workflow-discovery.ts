@@ -1,4 +1,4 @@
-import { FlunqApiClient, Workflow } from './flunq-client.js';
+import { FlunqApiClient, Workflow, WorkflowListParams, WorkflowListResponse } from './flunq-client.js';
 import { SchemaGenerator } from './schema-generator.js';
 import { Logger } from './logger.js';
 
@@ -147,5 +147,49 @@ export class WorkflowDiscoveryService {
   async refreshWorkflows(tenantId?: string): Promise<WorkflowTool[]> {
     this.clearCache(tenantId);
     return this.discoverWorkflows(tenantId);
+  }
+
+  async listWorkflowsWithPagination(params?: WorkflowListParams): Promise<WorkflowListResponse> {
+    try {
+      this.logger.info('Listing workflows with pagination and filtering', params);
+
+      // Use the enhanced API client method
+      const response = await this.flunqClient.listWorkflowsWithPagination(undefined, params);
+
+      this.logger.info(`Found ${response.items.length} workflows (${response.pagination.total} total)`);
+      return response;
+    } catch (error) {
+      this.logger.error('Failed to list workflows with pagination:', error);
+
+      // Fallback to basic discovery without pagination
+      const workflows = await this.discoverWorkflows();
+      return {
+        items: workflows.map(tool => ({
+          id: tool.id,
+          name: tool.name,
+          description: tool.description,
+          tenant_id: tool.metadata.tenantId,
+          definition: {},
+          state: 'active',
+          tags: tool.metadata.tags,
+          created_at: tool.metadata.createdAt,
+          updated_at: tool.metadata.createdAt,
+        })),
+        pagination: {
+          total: workflows.length,
+          limit: workflows.length,
+          offset: 0,
+          page: 1,
+          size: workflows.length,
+          total_pages: 1,
+          has_next: false,
+          has_previous: false,
+        },
+        filters: {
+          applied: {},
+          count: workflows.length,
+        },
+      };
+    }
   }
 }

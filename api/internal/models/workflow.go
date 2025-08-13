@@ -66,12 +66,86 @@ type UpdateWorkflowRequest struct {
 	Tags        []string               `json:"tags,omitempty"`
 }
 
+// PaginationMeta represents pagination metadata
+type PaginationMeta struct {
+	Total       int  `json:"total"`
+	Limit       int  `json:"limit"`
+	Offset      int  `json:"offset"`
+	Page        int  `json:"page"`
+	Size        int  `json:"size"`
+	TotalPages  int  `json:"total_pages"`
+	HasNext     bool `json:"has_next"`
+	HasPrevious bool `json:"has_previous"`
+}
+
+// FilterMeta represents applied filters metadata
+type FilterMeta struct {
+	Applied map[string]interface{} `json:"applied"`
+	Count   int                    `json:"count"` // Number of items after filtering but before pagination
+}
+
 // WorkflowListResponse represents the response for listing workflows
 type WorkflowListResponse struct {
-	Items  []Workflow `json:"items"`
-	Total  int        `json:"total"`
-	Limit  int        `json:"limit"`
-	Offset int        `json:"offset"`
+	Items      []Workflow     `json:"items"`
+	Pagination PaginationMeta `json:"pagination"`
+	Filters    FilterMeta     `json:"filters"`
+	Sort       *SortMeta      `json:"sort,omitempty"`
+}
+
+// SortMeta represents sorting metadata
+type SortMeta struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+// NewPaginationMeta creates pagination metadata from parameters and totals
+func NewPaginationMeta(total, filteredCount int, params PaginationParams) PaginationMeta {
+	// Handle both limit/offset and page/size patterns
+	var limit, offset, page, size int
+
+	if params.Page > 0 && params.Size > 0 {
+		// Page-based pagination
+		page = params.Page
+		size = params.Size
+		limit = size
+		offset = (page - 1) * size
+	} else {
+		// Offset-based pagination
+		limit = params.Limit
+		if limit == 0 {
+			limit = 20 // default
+		}
+		offset = params.Offset
+		page = (offset / limit) + 1
+		size = limit
+	}
+
+	totalPages := (filteredCount + limit - 1) / limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	return PaginationMeta{
+		Total:       total,
+		Limit:       limit,
+		Offset:      offset,
+		Page:        page,
+		Size:        size,
+		TotalPages:  totalPages,
+		HasNext:     offset+limit < filteredCount,
+		HasPrevious: offset > 0,
+	}
+}
+
+// NewFilterMeta creates filter metadata from applied filters and count
+func NewFilterMeta(appliedFilters map[string]interface{}, count int) FilterMeta {
+	if appliedFilters == nil {
+		appliedFilters = make(map[string]interface{})
+	}
+	return FilterMeta{
+		Applied: appliedFilters,
+		Count:   count,
+	}
 }
 
 // Validate validates the workflow definition

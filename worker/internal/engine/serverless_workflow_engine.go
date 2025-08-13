@@ -495,6 +495,8 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			if state.Variables == nil {
 				state.Variables, _ = structpb.NewStruct(make(map[string]interface{}))
 			}
+
+			// Add task output to workflow variables
 			for k, v := range taskData.Output.Fields {
 				state.Variables.Fields[k] = v
 			}
@@ -519,6 +521,15 @@ func (e *ServerlessWorkflowEngine) processTaskCompletedEvent(state *gen.Workflow
 			e.logger.Debug("Task already completed, skipping duplicate",
 				"task_name", taskName,
 				"total_completed_tasks", len(state.CompletedTasks))
+		}
+
+		// Update execution output with current workflow variables
+		// This ensures task outputs are visible immediately after task completion
+		if state.Variables != nil {
+			state.Output = state.Variables
+			e.logger.Debug("Updated execution output with workflow variables",
+				"task_name", taskName,
+				"output_keys", getMapKeys(state.Variables.AsMap()))
 		}
 	}
 
@@ -811,6 +822,16 @@ func (e *ServerlessWorkflowEngine) getTaskTypeFromDSL(definition *gen.WorkflowDe
 							e.logger.Info("Identified task type from DSL", "task_name", taskName, "task_type", "call")
 							return "call"
 						}
+
+						// Check for try/catch pattern with call inside try block
+						if tryBlock, hasTry := taskDefMap["try"]; hasTry {
+							if tryMap, ok := tryBlock.(map[string]interface{}); ok {
+								if _, hasCallInTry := tryMap["call"]; hasCallInTry {
+									e.logger.Info("Identified task type from DSL (try/catch pattern)", "task_name", taskName, "task_type", "call")
+									return "call"
+								}
+							}
+						}
 						e.logger.Debug("Task definition found but no recognized task type", "task_name", taskName, "available_keys", getMapKeys(taskDefMap))
 					}
 				}
@@ -889,6 +910,35 @@ func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.Workflo
 								e.logger.Debug("Built call task configuration",
 									"task_name", taskName,
 									"config", callConfig)
+							} else if tryBlock, hasTry := taskDefMap["try"]; hasTry {
+								// Handle try/catch pattern with call inside try block
+								if tryMap, ok := tryBlock.(map[string]interface{}); ok {
+									if callType, hasCallInTry := tryMap["call"]; hasCallInTry {
+										e.logger.Debug("Processing call task configuration (try/catch pattern)",
+											"task_name", taskName,
+											"call_type", callType)
+
+										// Extract call configuration from try block
+										callConfig := e.buildCallTaskConfig(tryMap, callType, taskName)
+										taskInput["call_config"] = callConfig
+
+										// Extract output configuration from try block if present
+										if outputConfig, hasOutput := tryMap["output"]; hasOutput {
+											taskInput["output_config"] = outputConfig
+											e.logger.Info("Found output configuration in try block",
+												"task_name", taskName,
+												"output_config", outputConfig)
+										} else {
+											e.logger.Info("No output configuration found in try block",
+												"task_name", taskName,
+												"try_keys", getMapKeys(tryMap))
+										}
+
+										e.logger.Debug("Built call task configuration (try/catch pattern)",
+											"task_name", taskName,
+											"config", callConfig)
+									}
+								}
 							}
 						}
 						break
@@ -1037,9 +1087,9 @@ func (e *ServerlessWorkflowEngine) executeSetTask(ctx context.Context, task *gen
 
 	// Extract data to inject
 	taskInput := task.Input.AsMap()
-	injectData, exists := taskInput["inject_data"]
+	injectData, exists := taskInput["set_data"]
 	if !exists {
-		return nil, fmt.Errorf("no inject_data found in set task input")
+		return nil, fmt.Errorf("no set_data found in set task input")
 	}
 
 	// Update workflow variables

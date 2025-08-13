@@ -304,6 +304,34 @@ func (s *WorkflowService) ListWorkflows(ctx context.Context, params *models.Work
 	return workflows, total, nil
 }
 
+// ListWorkflowsWithFilters lists workflows with enhanced filtering and returns filter metadata
+func (s *WorkflowService) ListWorkflowsWithFilters(ctx context.Context, params *models.WorkflowListParams) ([]models.Workflow, int, int, map[string]interface{}, error) {
+	// Get all workflows first (without pagination) to apply filters to entire dataset
+	allParams := *params
+	allParams.Limit = 0 // Get all records
+	allParams.Offset = 0
+	allParams.Page = 0
+	allParams.Size = 0
+
+	allWorkflows, total, err := s.workflowAdapter.List(ctx, &allParams)
+	if err != nil {
+		s.logger.Error("Failed to list all workflows from repository", zap.Error(err))
+		return nil, 0, 0, nil, fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	// Apply filters to the entire dataset
+	filteredWorkflows, appliedFilters := s.applyWorkflowFilters(allWorkflows, params)
+	filteredCount := len(filteredWorkflows)
+
+	// Apply sorting
+	s.sortWorkflows(filteredWorkflows, params.SortBy, params.SortOrder)
+
+	// Apply pagination to filtered results
+	paginatedWorkflows := s.paginateWorkflows(filteredWorkflows, params.PaginationParams)
+
+	return paginatedWorkflows, total, filteredCount, appliedFilters, nil
+}
+
 // ExecuteWorkflow starts execution of a workflow
 func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string, req *models.ExecuteWorkflowRequest) (*models.Execution, error) {
 	s.logger.Info("Starting workflow execution",
@@ -728,4 +756,174 @@ func isNotFoundError(err error) bool {
 	// This would be implemented based on your repository layer
 	// For now, we'll use a simple string check
 	return err != nil && (err.Error() == "not found" || err.Error() == "record not found")
+}
+
+// applyWorkflowFilters applies filters to workflows and returns filtered results with applied filter metadata
+func (s *WorkflowService) applyWorkflowFilters(workflows []models.Workflow, params *models.WorkflowListParams) ([]models.Workflow, map[string]interface{}) {
+	filtered := make([]models.Workflow, 0, len(workflows))
+	appliedFilters := make(map[string]interface{})
+
+	for _, workflow := range workflows {
+		include := true
+
+		// Status filter
+		if params.Status != "" {
+			if string(workflow.State) != params.Status {
+				include = false
+			}
+			appliedFilters["status"] = params.Status
+		}
+
+		// Name filter (partial match, case-insensitive)
+		if params.Name != "" {
+			if !containsIgnoreCase(workflow.Name, params.Name) {
+				include = false
+			}
+			appliedFilters["name"] = params.Name
+		}
+
+		// Description filter (partial match, case-insensitive)
+		if params.Description != "" {
+			if !containsIgnoreCase(workflow.Description, params.Description) {
+				include = false
+			}
+			appliedFilters["description"] = params.Description
+		}
+
+		// Tags filter (comma-separated, any match)
+		if params.Tags != "" {
+			tagFilters := parseCommaSeparated(params.Tags)
+			if !hasAnyTag(workflow.Tags, tagFilters) {
+				include = false
+			}
+			appliedFilters["tags"] = tagFilters
+		}
+
+		// Search filter (searches name, description, and tags)
+		if params.Search != "" {
+			if !searchWorkflow(workflow, params.Search) {
+				include = false
+			}
+			appliedFilters["search"] = params.Search
+		}
+
+		// Tenant filter
+		if params.TenantID != "" {
+			if workflow.TenantID != params.TenantID {
+				include = false
+			}
+			appliedFilters["tenant_id"] = params.TenantID
+		}
+
+		// Date range filters
+		if params.CreatedAt != "" {
+			if !isInDateRange(workflow.CreatedAt, params.CreatedAt) {
+				include = false
+			}
+			appliedFilters["created_at"] = params.CreatedAt
+		}
+
+		if params.UpdatedAt != "" {
+			if !isInDateRange(workflow.UpdatedAt, params.UpdatedAt) {
+				include = false
+			}
+			appliedFilters["updated_at"] = params.UpdatedAt
+		}
+
+		if include {
+			filtered = append(filtered, workflow)
+		}
+	}
+
+	return filtered, appliedFilters
+}
+
+// sortWorkflows sorts workflows by the specified field and order
+func (s *WorkflowService) sortWorkflows(workflows []models.Workflow, sortBy, sortOrder string) {
+	if sortBy == "" {
+		sortBy = "created_at"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+
+	sort.Slice(workflows, func(i, j int) bool {
+		var less bool
+		switch sortBy {
+		case "name":
+			less = workflows[i].Name < workflows[j].Name
+		case "description":
+			less = workflows[i].Description < workflows[j].Description
+		case "state":
+			less = workflows[i].State < workflows[j].State
+		case "tenant_id":
+			less = workflows[i].TenantID < workflows[j].TenantID
+		case "updated_at":
+			less = workflows[i].UpdatedAt.Before(workflows[j].UpdatedAt)
+		case "created_at":
+		default:
+			less = workflows[i].CreatedAt.Before(workflows[j].CreatedAt)
+		}
+
+		if sortOrder == "desc" {
+			return !less
+		}
+		return less
+	})
+}
+
+// paginateWorkflows applies pagination to workflows
+func (s *WorkflowService) paginateWorkflows(workflows []models.Workflow, params models.PaginationParams) []models.Workflow {
+	var limit, offset int
+
+	if params.Page > 0 && params.Size > 0 {
+		// Page-based pagination
+		limit = params.Size
+		offset = (params.Page - 1) * params.Size
+	} else {
+		// Offset-based pagination
+		limit = params.Limit
+		if limit == 0 {
+			limit = 20 // default
+		}
+		offset = params.Offset
+	}
+
+	if offset >= len(workflows) {
+		return []models.Workflow{}
+	}
+
+	end := offset + limit
+	if end > len(workflows) {
+		end = len(workflows)
+	}
+
+	return workflows[offset:end]
+}
+
+// searchWorkflow performs a global search across workflow fields
+func searchWorkflow(workflow models.Workflow, searchTerm string) bool {
+	// Search in name
+	if containsIgnoreCase(workflow.Name, searchTerm) {
+		return true
+	}
+
+	// Search in description
+	if containsIgnoreCase(workflow.Description, searchTerm) {
+		return true
+	}
+
+	// Search in tags
+	for _, tag := range workflow.Tags {
+		if containsIgnoreCase(tag, searchTerm) {
+			return true
+		}
+	}
+
+	// Search in tenant ID
+	if containsIgnoreCase(workflow.TenantID, searchTerm) {
+		return true
+	}
+
+	return false
 }

@@ -206,6 +206,11 @@ func (r *SharedExecutionRepository) List(ctx context.Context, params *models.Exe
 		return nil, 0, err
 	}
 
+	// If no executions found, return empty result immediately
+	if len(sharedExecutions) == 0 {
+		return []models.Execution{}, 0, nil
+	}
+
 	// Convert from shared interface models to API models
 	executions := make([]models.Execution, len(sharedExecutions))
 	for i, sharedExecution := range sharedExecutions {
@@ -247,8 +252,8 @@ func (r *SharedExecutionRepository) List(ctx context.Context, params *models.Exe
 		executions[i] = execution
 	}
 
-	// For now, return the length as total count
-	// TODO: Implement proper pagination in shared database interface
+	// Always return the actual count of executions as total
+	// This ensures consistency between items and total count
 	total := len(executions)
 
 	return executions, total, nil

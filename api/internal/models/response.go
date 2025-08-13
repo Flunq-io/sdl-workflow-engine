@@ -45,20 +45,46 @@ type CloudEvent struct {
 type PaginationParams struct {
 	Limit  int `form:"limit" binding:"omitempty,min=1,max=100"`
 	Offset int `form:"offset" binding:"omitempty,min=0"`
+	Page   int `form:"page" binding:"omitempty,min=1"`
+	Size   int `form:"size" binding:"omitempty,min=1,max=100"`
+}
+
+// SortParams represents sorting parameters
+type SortParams struct {
+	SortBy    string `form:"sort_by" binding:"omitempty"`
+	SortOrder string `form:"sort_order" binding:"omitempty,oneof=asc desc"`
+}
+
+// FilterParams represents common filtering parameters
+type FilterParams struct {
+	Search    string `form:"search"`
+	CreatedAt string `form:"created_at"` // ISO date range: "2024-01-01,2024-12-31"
+	UpdatedAt string `form:"updated_at"` // ISO date range: "2024-01-01,2024-12-31"
 }
 
 // WorkflowListParams represents parameters for listing workflows
 type WorkflowListParams struct {
 	PaginationParams
-	Status string `form:"status" binding:"omitempty,oneof=created active inactive"`
+	SortParams
+	FilterParams
+	Status      string `form:"status" binding:"omitempty,oneof=created active inactive"`
+	Tags        string `form:"tags"`        // Comma-separated list of tags
+	Name        string `form:"name"`        // Partial name match
+	Description string `form:"description"` // Partial description match
+	TenantID    string // Will be extracted from path parameter
 }
 
 // ExecutionListParams represents parameters for listing executions
 type ExecutionListParams struct {
 	PaginationParams
-	WorkflowID string `form:"workflow_id"`
-	Status     string `form:"status" binding:"omitempty,oneof=pending running completed failed cancelled"`
-	TenantID   string // Will be extracted from path parameter
+	SortParams
+	FilterParams
+	WorkflowID    string `form:"workflow_id"`
+	Status        string `form:"status" binding:"omitempty,oneof=pending running waiting suspended completed failed cancelled"`
+	CorrelationID string `form:"correlation_id"`
+	StartedAt     string `form:"started_at"`   // ISO date range: "2024-01-01,2024-12-31"
+	CompletedAt   string `form:"completed_at"` // ISO date range: "2024-01-01,2024-12-31"
+	TenantID      string // Will be extracted from path parameter
 }
 
 // EventHistoryParams represents parameters for getting event history

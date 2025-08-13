@@ -41,13 +41,19 @@ export default function ExecutionDetailPage() {
   const { data: execution, isLoading: executionLoading, error: executionError } = useQuery({
     queryKey: ['execution', tenant, id],
     queryFn: () => apiClient.getExecution(id),
-    refetchInterval: 5000, // Auto-refresh every 5 seconds
+    refetchInterval: (data) => {
+      // Only poll if execution is still running, and less frequently
+      return data?.status === 'running' ? 10000 : false // 10 seconds for running, no polling for completed
+    },
   })
 
   const { data: events, isLoading: eventsLoading, error: eventsError } = useQuery({
     queryKey: ['execution-events', tenant, id],
     queryFn: () => apiClient.getExecutionEvents(id),
-    refetchInterval: 5000, // Auto-refresh every 5 seconds
+    refetchInterval: () => {
+      // Only poll if execution is still running, and less frequently
+      return execution?.status === 'running' ? 10000 : false // 10 seconds for running, no polling for completed
+    },
   })
 
   if (executionLoading) {

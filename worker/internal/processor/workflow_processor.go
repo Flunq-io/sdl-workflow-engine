@@ -975,7 +975,29 @@ func (p *WorkflowProcessor) executeNextSDLStep(ctx context.Context, state *gen.W
 		"task_name", nextTask.Name,
 		"task_type", nextTask.TaskType)
 
-	// Publish task.requested event for Executor Service to handle
+	// Handle set tasks internally by the worker (they need JQ evaluation)
+	if nextTask.TaskType == "set" {
+		p.logger.Info("Executing set task internally",
+			"workflow_id", state.WorkflowId,
+			"task_name", nextTask.Name,
+			"task_type", nextTask.TaskType)
+
+		// Execute the task internally using the workflow engine
+		taskData, err := p.workflowEngine.ExecuteTask(ctx, nextTask, state)
+		if err != nil {
+			p.logger.Error("Failed to execute set task internally",
+				"workflow_id", state.WorkflowId,
+				"task_name", nextTask.Name,
+				"task_type", nextTask.TaskType,
+				"error", err)
+			return fmt.Errorf("failed to execute set task: %w", err)
+		}
+
+		// Publish task.completed event
+		return p.publishTaskCompletedEvent(ctx, nextTask, taskData, state)
+	}
+
+	// For other tasks (like "call"), send to executor service
 	if err := p.publishTaskRequestedEvent(ctx, nextTask, state); err != nil {
 		return fmt.Errorf("failed to publish task requested event: %w", err)
 	}
@@ -995,4 +1017,61 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// publishTaskCompletedEvent publishes a task.completed event for internally executed tasks
+func (p *WorkflowProcessor) publishTaskCompletedEvent(ctx context.Context, task *gen.PendingTask, taskData *gen.TaskData, state *gen.WorkflowState) error {
+	// Generate task ID (same pattern as publishTaskRequestedEvent)
+	taskID := fmt.Sprintf("task-%s-%d", task.Name, time.Now().UnixNano())
+
+	// Get execution and tenant IDs
+	executionID := ""
+	tenantID := ""
+	if state.Context != nil {
+		executionID = state.Context.ExecutionId
+		tenantID = state.Context.TenantId
+	}
+
+	// Create task completed event data
+	eventData := map[string]interface{}{
+		"task_id":      taskID,
+		"task_name":    task.Name,
+		"task_type":    task.TaskType,
+		"tenant_id":    tenantID,
+		"workflow_id":  state.WorkflowId,
+		"execution_id": executionID,
+		"success":      true,
+		"input":        task.Input.AsMap(),
+		"output":       taskData.Output.AsMap(),
+		"started_at":   taskData.Metadata.StartedAt.AsTime().Format(time.RFC3339),
+		"completed_at": taskData.Metadata.CompletedAt.AsTime().Format(time.RFC3339),
+		"duration_ms":  taskData.Metadata.DurationMs,
+	}
+
+	// Create CloudEvent
+	event := &cloudevents.CloudEvent{
+		ID:          uuid.New().String(),
+		Source:      "workflow-engine", // Use workflow-engine source so worker processes it
+		SpecVersion: "1.0",
+		Type:        "io.flunq.task.completed",
+		TenantID:    tenantID,
+		WorkflowID:  state.WorkflowId,
+		ExecutionID: executionID,
+		TaskID:      taskID,
+		Time:        time.Now(),
+		Data:        eventData,
+	}
+
+	// Publish the event
+	if err := p.eventStream.Publish(ctx, event); err != nil {
+		return fmt.Errorf("failed to publish task completed event: %w", err)
+	}
+
+	p.logger.Info("Published task completed event",
+		"task_id", taskID,
+		"task_name", task.Name,
+		"task_type", task.TaskType,
+		"workflow_id", state.WorkflowId)
+
+	return nil
 }

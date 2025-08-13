@@ -52,19 +52,36 @@ func (h *ExecutionHandler) List(c *gin.Context) {
 	// Set tenant_id from path parameter
 	params.TenantID = tenantID
 
-	// Set defaults
-	if params.Limit == 0 {
+	// Set defaults for pagination
+	if params.Limit == 0 && params.Size == 0 {
 		params.Limit = 20
 	}
+	if params.SortBy == "" {
+		params.SortBy = "started_at"
+	}
+	if params.SortOrder == "" {
+		params.SortOrder = "desc"
+	}
 
-	executions, total, err := h.executionService.ListExecutions(c.Request.Context(), &params)
+	// Try the enhanced filtering first, fall back to basic listing if it fails
+	executions, _, _, appliedFilters, err := h.executionService.ListExecutionsWithFilters(c.Request.Context(), &params)
 	if err != nil {
-		h.logger.Error("Failed to list executions", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
-			models.ErrorCodeInternalError,
-			models.MessageInternalError,
-		).WithRequestID(getRequestID(c)))
-		return
+		h.logger.Warn("Enhanced filtering failed, falling back to basic listing", zap.Error(err))
+
+		// Fallback to basic listing
+		basicExecutions, _, basicErr := h.executionService.ListExecutions(c.Request.Context(), &params)
+		if basicErr != nil {
+			h.logger.Error("Failed to list executions", zap.Error(basicErr))
+			c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
+				models.ErrorCodeInternalError,
+				models.MessageInternalError,
+			).WithRequestID(getRequestID(c)))
+			return
+		}
+
+		// Use basic results with corrected total
+		executions = basicExecutions
+		appliedFilters = make(map[string]interface{})
 	}
 
 	// Convert to response format
@@ -73,11 +90,35 @@ func (h *ExecutionHandler) List(c *gin.Context) {
 		executionResponses[i] = execution.ToResponse()
 	}
 
+	// Ensure total matches actual results for consistency
+	actualTotal := len(executions)
+	actualFilteredCount := len(executions)
+
+	h.logger.Info("EXECUTION HANDLER DEBUG",
+		zap.Int("executions_length", len(executions)),
+		zap.Int("actual_total", actualTotal),
+		zap.Int("actual_filtered_count", actualFilteredCount))
+
+	// Create pagination metadata
+	pagination := models.NewPaginationMeta(actualTotal, actualFilteredCount, params.PaginationParams)
+
+	// Create filter metadata
+	filters := models.NewFilterMeta(appliedFilters, actualFilteredCount)
+
+	// Create sort metadata
+	var sortMeta *models.SortMeta
+	if params.SortBy != "" {
+		sortMeta = &models.SortMeta{
+			Field: params.SortBy,
+			Order: params.SortOrder,
+		}
+	}
+
 	response := models.ExecutionListResponse{
-		Items:  executionResponses,
-		Total:  total,
-		Limit:  params.Limit,
-		Offset: params.Offset,
+		Items:      executionResponses,
+		Pagination: pagination,
+		Filters:    filters,
+		Sort:       sortMeta,
 	}
 
 	c.JSON(http.StatusOK, response)

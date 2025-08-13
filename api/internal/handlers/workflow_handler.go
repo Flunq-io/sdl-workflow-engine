@@ -80,12 +80,23 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		return
 	}
 
-	// Set defaults
-	if params.Limit == 0 {
-		params.Limit = 20
+	// Extract tenant_id from path parameter if available
+	if tenantID := c.Param("tenant_id"); tenantID != "" {
+		params.TenantID = tenantID
 	}
 
-	workflows, total, err := h.workflowService.ListWorkflows(c.Request.Context(), &params)
+	// Set defaults for pagination
+	if params.Limit == 0 && params.Size == 0 {
+		params.Limit = 20
+	}
+	if params.SortBy == "" {
+		params.SortBy = "created_at"
+	}
+	if params.SortOrder == "" {
+		params.SortOrder = "desc"
+	}
+
+	workflows, total, filteredCount, appliedFilters, err := h.workflowService.ListWorkflowsWithFilters(c.Request.Context(), &params)
 	if err != nil {
 		h.logger.Error("Failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
@@ -95,11 +106,26 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		return
 	}
 
+	// Create pagination metadata
+	pagination := models.NewPaginationMeta(total, filteredCount, params.PaginationParams)
+
+	// Create filter metadata
+	filters := models.NewFilterMeta(appliedFilters, filteredCount)
+
+	// Create sort metadata
+	var sortMeta *models.SortMeta
+	if params.SortBy != "" {
+		sortMeta = &models.SortMeta{
+			Field: params.SortBy,
+			Order: params.SortOrder,
+		}
+	}
+
 	response := models.WorkflowListResponse{
-		Items:  workflows,
-		Total:  total,
-		Limit:  params.Limit,
-		Offset: params.Offset,
+		Items:      workflows,
+		Pagination: pagination,
+		Filters:    filters,
+		Sort:       sortMeta,
 	}
 
 	c.JSON(http.StatusOK, response)

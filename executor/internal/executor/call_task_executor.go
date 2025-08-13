@@ -105,7 +105,7 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		output = map[string]interface{}{
 			"status_code": response.StatusCode,
 			"headers":     response.Headers,
-			"data":        response.Content,
+			"content":     response.Content,
 			"request":     response.Request,
 		}
 	}
@@ -122,6 +122,9 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		zap.Bool("success", success),
 		zap.Duration("duration", duration))
 
+	// Apply output transformation if configured
+	finalOutput := e.applyOutputTransformation(task, output)
+
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
@@ -130,7 +133,7 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		ExecutionID: task.ExecutionID,
 		Success:     success,
 		Input:       task.Input,
-		Output:      output,
+		Output:      finalOutput,
 		Duration:    duration,
 		StartedAt:   startTime,
 		ExecutedAt:  time.Now(),
@@ -352,4 +355,213 @@ func (e *CallTaskExecutor) determineErrorType(errMsg string, status int) string 
 	default:
 		return ErrorTypeRuntime
 	}
+}
+
+// applyOutputTransformation applies output transformation based on task configuration
+func (e *CallTaskExecutor) applyOutputTransformation(task *TaskRequest, rawOutput map[string]interface{}) map[string]interface{} {
+	// Check if output transformation is configured in task input
+	if task.Input == nil {
+		e.logger.Info("🔍 NO TASK INPUT - skipping transformation",
+			zap.String("task_id", task.TaskID),
+			zap.String("task_name", task.TaskName))
+		return rawOutput
+	}
+
+	outputConfig, exists := task.Input["output_config"]
+	if !exists {
+		e.logger.Info("🔍 NO OUTPUT_CONFIG - skipping transformation",
+			zap.String("task_id", task.TaskID),
+			zap.String("task_name", task.TaskName),
+			zap.Any("available_input_keys", getMapKeys(task.Input)))
+		return rawOutput
+	}
+
+	e.logger.Info("🎯 APPLYING OUTPUT TRANSFORMATION",
+		zap.String("task_id", task.TaskID),
+		zap.String("task_name", task.TaskName),
+		zap.Any("output_config", outputConfig),
+		zap.String("output_config_type", fmt.Sprintf("%T", outputConfig)))
+
+	// Apply transformation based on configuration type
+	transformed, err := e.transformOutput(outputConfig, rawOutput, task.TaskName)
+	if err != nil {
+		e.logger.Error("❌ TRANSFORMATION FAILED - using raw output",
+			zap.String("task_id", task.TaskID),
+			zap.String("task_name", task.TaskName),
+			zap.Error(err))
+		return rawOutput
+	}
+
+	e.logger.Info("✅ TRANSFORMATION SUCCESSFUL",
+		zap.String("task_id", task.TaskID),
+		zap.String("task_name", task.TaskName),
+		zap.Any("raw_output_keys", getMapKeys(rawOutput)),
+		zap.Any("transformed_output", transformed),
+		zap.Any("transformed_output_keys", getMapKeys(transformed)))
+
+	return transformed
+}
+
+// transformOutput applies the actual transformation logic
+func (e *CallTaskExecutor) transformOutput(outputConfig interface{}, rawOutput map[string]interface{}, taskName string) (map[string]interface{}, error) {
+	// Handle SDL "as" syntax: {"as": {"varName": "${ .path }"}}
+	if configMap, ok := outputConfig.(map[string]interface{}); ok {
+		if asConfig, exists := configMap["as"]; exists {
+			if asMap, ok := asConfig.(map[string]interface{}); ok {
+				result := make(map[string]interface{})
+
+				for varName, expr := range asMap {
+					if exprStr, ok := expr.(string); ok {
+						value, err := e.evaluateExpression(exprStr, rawOutput)
+						if err != nil {
+							e.logger.Warn("Failed to evaluate expression, skipping",
+								zap.String("variable", varName),
+								zap.String("expression", exprStr),
+								zap.Error(err))
+							continue
+						}
+						result[varName] = value
+					}
+				}
+
+				return result, nil
+			}
+		}
+	}
+
+	// Handle simple string expressions like "${ .content[0].name }" (fallback to task name)
+	if expr, ok := outputConfig.(string); ok {
+		value, err := e.evaluateExpression(expr, rawOutput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to evaluate expression '%s': %w", expr, err)
+		}
+
+		// Use task name as the variable name when no "as" is provided
+		return map[string]interface{}{
+			taskName: value,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported output configuration type: %T", outputConfig)
+}
+
+// evaluateExpression evaluates a single expression like "${ .content[0].name }"
+func (e *CallTaskExecutor) evaluateExpression(expr string, rawOutput map[string]interface{}) (interface{}, error) {
+	// Remove ${ } wrapper if present
+	if strings.HasPrefix(expr, "${") && strings.HasSuffix(expr, "}") {
+		expr = strings.TrimSpace(expr[2 : len(expr)-1])
+	}
+
+	// Handle field access like ".content", ".content[0]", ".content[0].name"
+	if strings.HasPrefix(expr, ".") {
+		path := strings.TrimPrefix(expr, ".")
+		return e.extractValueFromPath(rawOutput, path)
+	}
+
+	return nil, fmt.Errorf("unsupported expression format: %s", expr)
+}
+
+// extractValueFromPath extracts a value from a nested map using a path like "content[0].name"
+func (e *CallTaskExecutor) extractValueFromPath(data map[string]interface{}, path string) (interface{}, error) {
+	parts := e.splitPathWithArrays(path)
+	current := interface{}(data)
+
+	for i, part := range parts {
+		e.logger.Debug("Processing path part",
+			zap.String("part", part),
+			zap.Int("index", i),
+			zap.String("current_type", fmt.Sprintf("%T", current)))
+
+		// Handle array indexing like "content[0]"
+		if strings.Contains(part, "[") && strings.Contains(part, "]") {
+			fieldName := part[:strings.Index(part, "[")]
+			indexStr := part[strings.Index(part, "[")+1 : strings.Index(part, "]")]
+
+			// Get the field first
+			if currentMap, ok := current.(map[string]interface{}); ok {
+				if fieldValue, exists := currentMap[fieldName]; exists {
+					// Now handle array indexing
+					if arrayValue, ok := fieldValue.([]interface{}); ok {
+						index := 0
+						if indexStr != "" {
+							if idx, err := strconv.Atoi(indexStr); err == nil {
+								index = idx
+							} else {
+								return nil, fmt.Errorf("invalid array index '%s'", indexStr)
+							}
+						}
+
+						if index < 0 || index >= len(arrayValue) {
+							return nil, fmt.Errorf("array index %d out of bounds (length: %d)", index, len(arrayValue))
+						}
+
+						current = arrayValue[index]
+					} else {
+						return nil, fmt.Errorf("field '%s' is not an array", fieldName)
+					}
+				} else {
+					return nil, fmt.Errorf("field '%s' not found", fieldName)
+				}
+			} else {
+				return nil, fmt.Errorf("cannot access field '%s' on non-object", fieldName)
+			}
+		} else {
+			// Handle regular field access
+			if currentMap, ok := current.(map[string]interface{}); ok {
+				if value, exists := currentMap[part]; exists {
+					current = value
+				} else {
+					return nil, fmt.Errorf("field '%s' not found", part)
+				}
+			} else {
+				return nil, fmt.Errorf("cannot access field '%s' on non-object", part)
+			}
+		}
+	}
+
+	return current, nil
+}
+
+// splitPathWithArrays splits a path like "content[0].name" into ["content[0]", "name"]
+func (e *CallTaskExecutor) splitPathWithArrays(path string) []string {
+	var parts []string
+	current := ""
+	inBrackets := false
+
+	for _, char := range path {
+		switch char {
+		case '[':
+			inBrackets = true
+			current += string(char)
+		case ']':
+			inBrackets = false
+			current += string(char)
+		case '.':
+			if inBrackets {
+				current += string(char)
+			} else {
+				if current != "" {
+					parts = append(parts, current)
+					current = ""
+				}
+			}
+		default:
+			current += string(char)
+		}
+	}
+
+	if current != "" {
+		parts = append(parts, current)
+	}
+
+	return parts
+}
+
+// getMapKeys returns the keys of a map for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
