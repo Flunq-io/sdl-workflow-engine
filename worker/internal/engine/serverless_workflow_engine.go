@@ -1285,23 +1285,37 @@ func (e *ServerlessWorkflowEngine) evaluateSetTaskData(setConfig interface{}, st
 func (e *ServerlessWorkflowEngine) buildWorkflowContext(state *gen.WorkflowState) map[string]interface{} {
 	context := make(map[string]interface{})
 
-	// Add workflow data
-	workflow := make(map[string]interface{})
+	// Add workflow variables directly to root level for easy access
+	if state.Variables != nil {
+		for key, value := range state.Variables.AsMap() {
+			context[key] = value
+		}
+	}
 
-	// Add workflow input if available
+	// Add workflow input directly to root level
+	if state.Input != nil {
+		for key, value := range state.Input.AsMap() {
+			// Don't overwrite variables with input
+			if _, exists := context[key]; !exists {
+				context[key] = value
+			}
+		}
+	}
+
+	// Add special functions
+	context["now"] = func() string {
+		return time.Now().Format(time.RFC3339)
+	}
+
+	// Also keep the nested structure for backward compatibility
+	workflow := make(map[string]interface{})
 	if state.Input != nil {
 		workflow["input"] = state.Input.AsMap()
 	}
-
-	// Add workflow variables if available
 	if state.Variables != nil {
 		workflow["variables"] = state.Variables.AsMap()
 	}
-
 	context["workflow"] = workflow
-
-	// Add current timestamp
-	context["now"] = time.Now().Format(time.RFC3339)
 
 	return context
 }
