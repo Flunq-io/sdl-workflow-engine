@@ -1,6 +1,7 @@
 import { FlunqApiClient, Workflow, WorkflowListParams, WorkflowListResponse } from './flunq-client.js';
 import { SchemaGenerator } from './schema-generator.js';
 import { Logger } from './logger.js';
+import { Config } from './config.js';
 
 export interface WorkflowTool {
   id: string;
@@ -20,6 +21,7 @@ export class WorkflowDiscoveryService {
   private flunqClient: FlunqApiClient;
   private schemaGenerator: SchemaGenerator;
   private logger: Logger;
+  private config: Config;
   private cache: Map<string, WorkflowTool[]> = new Map();
   private cacheExpiry: Map<string, number> = new Map();
   private readonly CACHE_TTL = 30 * 1000; // 30 seconds for development
@@ -27,15 +29,17 @@ export class WorkflowDiscoveryService {
   constructor(
     flunqClient: FlunqApiClient,
     schemaGenerator: SchemaGenerator,
-    logger: Logger
+    logger: Logger,
+    config: Config
   ) {
     this.flunqClient = flunqClient;
     this.schemaGenerator = schemaGenerator;
     this.logger = logger;
+    this.config = config;
   }
 
   async discoverWorkflows(tenantId?: string): Promise<WorkflowTool[]> {
-    const tenant = tenantId || 'default';
+    const tenant = tenantId || this.config.defaultTenant;
     const cacheKey = `workflows:${tenant}`;
 
     // Check cache first
@@ -79,9 +83,9 @@ export class WorkflowDiscoveryService {
   private async convertWorkflowToTool(workflow: Workflow): Promise<WorkflowTool> {
     this.logger.debug(`Converting workflow to tool: ${workflow.name}`);
 
-    // Generate input schema from workflow definition
-    const inputSchema = this.schemaGenerator.generateInputSchema(workflow.definition);
-    
+    // Use workflow's inputSchema if available, otherwise generate from definition
+    const inputSchema = workflow.inputSchema || this.schemaGenerator.generateInputSchema(workflow.definition);
+
     // Generate output schema (optional)
     const outputSchema = this.schemaGenerator.generateOutputSchema(workflow.definition);
 

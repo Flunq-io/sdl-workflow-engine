@@ -31,7 +31,8 @@ class FlunqMcpServer {
     this.discoveryService = new WorkflowDiscoveryService(
       this.flunqClient,
       this.schemaGenerator,
-      this.logger
+      this.logger,
+      this.config
     );
     this.executionManager = new ExecutionManager(
       this.flunqClient,
@@ -59,13 +60,31 @@ class FlunqMcpServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       try {
         this.logger.info('Discovering workflows...');
-        const workflows = await this.discoveryService.discoverWorkflows();
-        
+
+        // Use the working listWorkflowsWithPagination method directly
+        const response = await this.discoveryService.listWorkflowsWithPagination();
+        const workflows = response.items || [];
+
         const tools: Tool[] = workflows.map(workflow => ({
           name: `workflow_${workflow.id}`,
           description: workflow.description || `Execute ${workflow.name} workflow`,
-          inputSchema: workflow.inputSchema,
+          inputSchema: workflow.inputSchema || {
+            type: 'object',
+            properties: {},
+            additionalProperties: true,
+          },
         }));
+
+        // Debug: Add a tool showing how many workflows were found
+        tools.push({
+          name: 'debug_workflow_count',
+          description: `Found ${workflows.length} workflows for execution`,
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false,
+          },
+        });
 
         // Add utility tools
         tools.push({
@@ -77,6 +96,8 @@ class FlunqMcpServer {
             additionalProperties: false,
           },
         });
+
+
 
         tools.push({
           name: 'list_workflows',
@@ -153,6 +174,7 @@ class FlunqMcpServer {
 
       try {
         this.logger.info(`Executing tool: ${name}`, { args });
+        this.logger.info(`Tool name received: "${name}" (length: ${name.length})`);
 
         // Handle refresh tool
         if (name === 'refresh_workflows') {
@@ -162,7 +184,7 @@ class FlunqMcpServer {
             content: [
               {
                 type: 'text',
-                text: `Workflow cache refreshed. Found ${workflows.length} workflows.`,
+                text: `UNIQUE TEST 12345 - Found ${workflows.length} workflows at ${new Date().toISOString()}.`,
               },
             ],
           };
@@ -176,6 +198,22 @@ class FlunqMcpServer {
               {
                 type: 'text',
                 text: JSON.stringify(response, null, 2),
+              },
+            ],
+          };
+        }
+
+        // Handle test execution tool
+        if (name === 'execute_purchase_requisition') {
+          const result = await this.executionManager.executeWorkflow(
+            'wf_28c0d892-aa31-47',
+            args || {}
+          );
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
               },
             ],
           };
@@ -232,7 +270,7 @@ class FlunqMcpServer {
   async start(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    this.logger.info('Flunq MCP Server started');
+    this.logger.info('Flunq MCP Server started - DEBUG VERSION WITH LOGGING');
   }
 }
 

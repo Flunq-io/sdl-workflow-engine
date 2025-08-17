@@ -48,6 +48,7 @@ type WorkflowService struct {
 	executionRepo   ExecutionRepository
 	eventStream     interfaces.EventStream
 	redisClient     *redis.Client
+	inputValidator  *InputValidator
 	logger          *zap.Logger
 }
 
@@ -64,12 +65,25 @@ func NewWorkflowService(
 		executionRepo:   executionRepo,
 		eventStream:     eventStream,
 		redisClient:     redisClient,
+		inputValidator:  NewInputValidator(logger),
 		logger:          logger,
 	}
 }
 
 // CreateWorkflow creates a new workflow
 func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.CreateWorkflowRequest) (*models.Workflow, error) {
+	// Validate input schema if provided
+	if req.InputSchema != nil {
+		if err := s.inputValidator.ValidateSchema(req.InputSchema); err != nil {
+			s.logger.Error("Invalid input schema provided", zap.Error(err))
+			return nil, &models.ValidationError{
+				Field:   "inputSchema",
+				Message: fmt.Sprintf("Invalid JSON schema: %v", err),
+			}
+		}
+		s.logger.Debug("Input schema validation passed", zap.String("workflow_name", req.Name))
+	}
+
 	// Generate workflow ID
 	workflowID := generateWorkflowID()
 
@@ -80,6 +94,7 @@ func (s *WorkflowService) CreateWorkflow(ctx context.Context, req *models.Create
 		Description: req.Description,
 		TenantID:    req.TenantID,
 		Definition:  req.Definition,
+		InputSchema: req.InputSchema,
 		State:       models.WorkflowStateActive,
 		Tags:        req.Tags,
 		CreatedAt:   time.Now(),
@@ -362,6 +377,46 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID string
 	// Check if workflow can be executed
 	if workflow.State == models.WorkflowStateInactive {
 		return nil, fmt.Errorf("workflow cannot be executed in %s state", workflow.State)
+	}
+
+	// Validate input against workflow input schema if defined
+	s.logger.Info("Checking input schema for validation",
+		zap.String("workflow_id", workflowID),
+		zap.Bool("has_input_schema", workflow.InputSchema != nil),
+		zap.Int("schema_fields", len(workflow.InputSchema)),
+		zap.String("execution_input_keys", fmt.Sprintf("%v", getMapKeys(req.Input))))
+
+	if workflow.InputSchema != nil && len(workflow.InputSchema) > 0 {
+		s.logger.Info("Validating execution input against workflow schema",
+			zap.String("workflow_id", workflowID),
+			zap.String("execution_input_keys", fmt.Sprintf("%v", getMapKeys(req.Input))))
+
+		validationResult, err := s.inputValidator.ValidateInput(workflow.InputSchema, req.Input)
+		if err != nil {
+			s.logger.Error("Input validation error",
+				zap.String("workflow_id", workflowID),
+				zap.Error(err))
+			return nil, fmt.Errorf("input validation failed: %w", err)
+		}
+
+		if !validationResult.Valid {
+			errorMessage := s.inputValidator.FormatValidationErrors(validationResult.Errors, workflow.InputSchema)
+			s.logger.Info("Input validation failed",
+				zap.String("workflow_id", workflowID),
+				zap.Int("error_count", len(validationResult.Errors)),
+				zap.String("formatted_errors", errorMessage))
+
+			return nil, &models.ValidationError{
+				Field:   "input",
+				Message: errorMessage,
+			}
+		}
+
+		s.logger.Info("Input validation passed",
+			zap.String("workflow_id", workflowID))
+	} else {
+		s.logger.Info("No input schema defined, accepting any input",
+			zap.String("workflow_id", workflowID))
 	}
 
 	// Generate execution ID
@@ -926,4 +981,13 @@ func searchWorkflow(workflow models.Workflow, searchTerm string) bool {
 	}
 
 	return false
+}
+
+// getMapKeys returns the keys of a map for debugging purposes
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

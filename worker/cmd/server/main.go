@@ -92,14 +92,37 @@ func (l *LoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
 }
 
 func main() {
-	// Initialize logger
-	logger, _ := zap.NewProduction()
+	// Load configuration first
+	config := loadConfig()
+
+	// Initialize logger with configurable level
+	var logger *zap.Logger
+	var err error
+
+	if config.LogLevel == "debug" {
+		logger, err = zap.NewDevelopment()
+	} else {
+		// Create production config with configurable level
+		cfg := zap.NewProductionConfig()
+		switch config.LogLevel {
+		case "error":
+			cfg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+		case "warn":
+			cfg.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
+		case "info":
+			cfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+		default:
+			cfg.Level = zap.NewAtomicLevelAt(zap.WarnLevel) // Default to WARN to reduce noise
+		}
+		logger, err = cfg.Build()
+	}
+
+	if err != nil {
+		panic(err)
+	}
 	defer logger.Sync()
 
 	zapLogger := &adapters.ZapLogger{Logger: logger}
-
-	// Load configuration
-	config := loadConfig()
 
 	zapLogger.Info("Starting Worker service",
 		"version", "1.0.0",
@@ -218,7 +241,7 @@ func loadConfig() *Config {
 	return &Config{
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		LogLevel:      getEnv("LOG_LEVEL", "warn"),
 		MetricsPort:   getEnv("METRICS_PORT", "9090"),
 		HealthPort:    getEnv("HEALTH_PORT", "8082"),
 	}

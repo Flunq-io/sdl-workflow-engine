@@ -329,6 +329,16 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 			return
 		}
 
+		if validationErr, ok := err.(*models.ValidationError); ok {
+			c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+				models.ErrorCodeValidation,
+				validationErr.Message,
+			).WithDetails(map[string]interface{}{
+				"field": validationErr.Field,
+			}).WithRequestID(getRequestID(c)))
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, models.NewErrorResponse(
 			models.ErrorCodeInternalError,
 			models.MessageInternalError,

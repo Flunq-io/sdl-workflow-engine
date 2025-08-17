@@ -20,6 +20,7 @@ type Workflow struct {
 	Description string                 `json:"description" db:"description"`
 	TenantID    string                 `json:"tenant_id" db:"tenant_id"`
 	Definition  map[string]interface{} `json:"definition" db:"definition"`
+	InputSchema map[string]interface{} `json:"inputSchema,omitempty" db:"input_schema"`
 	State       WorkflowState          `json:"state" db:"state"`
 	Tags        []string               `json:"tags" db:"tags"`
 	CreatedAt   time.Time              `json:"created_at" db:"created_at"`
@@ -55,6 +56,7 @@ type CreateWorkflowRequest struct {
 	Description string                 `json:"description"`
 	TenantID    string                 `json:"tenant_id" binding:"required"`
 	Definition  map[string]interface{} `json:"definition" binding:"required"`
+	InputSchema map[string]interface{} `json:"inputSchema,omitempty"`
 	Tags        []string               `json:"tags"`
 }
 

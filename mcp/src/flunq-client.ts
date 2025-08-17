@@ -8,6 +8,7 @@ export interface Workflow {
   description: string;
   tenant_id: string;
   definition: any;
+  inputSchema?: any;
   state: string;
   tags: string[];
   created_at: string;
@@ -128,34 +129,9 @@ export class FlunqApiClient {
   }
 
   async listWorkflows(tenantId?: string, params?: WorkflowListParams): Promise<Workflow[]> {
-    const tenant = tenantId || this.config.defaultTenant;
-
-    // Build query parameters
-    const queryParams = new URLSearchParams();
-    if (params) {
-      if (params.page) queryParams.set('page', params.page.toString());
-      if (params.size) queryParams.set('size', params.size.toString());
-      if (params.sort_by) queryParams.set('sort_by', params.sort_by);
-      if (params.sort_order) queryParams.set('sort_order', params.sort_order);
-      if (params.status) queryParams.set('status', params.status);
-      if (params.name) queryParams.set('name', params.name);
-      if (params.description) queryParams.set('description', params.description);
-      if (params.tags) queryParams.set('tags', params.tags);
-      if (params.search) queryParams.set('search', params.search);
-      if (params.created_at) queryParams.set('created_at', params.created_at);
-      if (params.updated_at) queryParams.set('updated_at', params.updated_at);
-    }
-
-    const url = `/api/v1/${tenant}/workflows${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    const response = await this.client.get(url);
-
-    // Handle both old and new API response formats
-    if (response.data.items) {
-      return response.data.items;
-    }
-
-    // Fallback for legacy format
-    return response.data || [];
+    // Use the working listWorkflowsWithPagination method and extract items
+    const response = await this.listWorkflowsWithPagination(tenantId, params);
+    return response.items || [];
   }
 
   async listWorkflowsWithPagination(tenantId?: string, params?: WorkflowListParams): Promise<WorkflowListResponse> {

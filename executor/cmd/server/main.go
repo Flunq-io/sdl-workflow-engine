@@ -148,7 +148,7 @@ func loadConfig() *Config {
 	return &Config{
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		LogLevel:      getEnv("LOG_LEVEL", "warn"),
 		MetricsPort:   getEnv("METRICS_PORT", "9091"),
 		HealthPort:    getEnv("HEALTH_PORT", "8083"),
 	}
