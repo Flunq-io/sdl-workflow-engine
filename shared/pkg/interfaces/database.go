@@ -45,7 +45,6 @@ type WorkflowDefinition struct {
 	Version     string                 `json:"version"`
 	SpecVersion string                 `json:"spec_version"`
 	Definition  map[string]interface{} `json:"definition"`
-	InputSchema map[string]interface{} `json:"inputSchema,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
 	CreatedBy   string                 `json:"created_by"`

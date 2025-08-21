@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -47,6 +48,8 @@ func (l *LoggerAdapter) convertFields(fields ...interface{}) []zap.Field {
 }
 
 func main() {
+	fmt.Println("🔥🔥🔥 STARTING EXECUTOR WITH PARAMETER EVALUATION FIX 🔥🔥🔥")
+
 	// Load configuration first
 	config := loadConfig()
 

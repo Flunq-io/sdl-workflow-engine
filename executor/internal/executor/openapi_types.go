@@ -12,23 +12,23 @@ type ExternalResource struct {
 
 // OpenAPIDocument represents a parsed OpenAPI specification (supports both OpenAPI 3.x and Swagger 2.0)
 type OpenAPIDocument struct {
-	OpenAPI     string                                 `json:"openapi"` // OpenAPI 3.x version
-	Swagger     string                                 `json:"swagger"` // Swagger 2.0 version
-	Info        map[string]interface{}                 `json:"info"`
-	Servers     []OpenAPIServer                        `json:"servers"`  // OpenAPI 3.x
-	Host        string                                 `json:"host"`     // Swagger 2.0
-	BasePath    string                                 `json:"basePath"` // Swagger 2.0
-	Schemes     []string                               `json:"schemes"`  // Swagger 2.0
-	Paths       map[string]map[string]OpenAPIOperation `json:"paths"`
-	Components  map[string]interface{}                 `json:"components"`  // OpenAPI 3.x
-	Definitions map[string]interface{}                 `json:"definitions"` // Swagger 2.0
+	OpenAPI     string                                 `json:"openapi" yaml:"openapi"` // OpenAPI 3.x version
+	Swagger     string                                 `json:"swagger" yaml:"swagger"` // Swagger 2.0 version
+	Info        map[string]interface{}                 `json:"info" yaml:"info"`
+	Servers     []OpenAPIServer                        `json:"servers" yaml:"servers"`   // OpenAPI 3.x
+	Host        string                                 `json:"host" yaml:"host"`         // Swagger 2.0
+	BasePath    string                                 `json:"basePath" yaml:"basePath"` // Swagger 2.0
+	Schemes     []string                               `json:"schemes" yaml:"schemes"`   // Swagger 2.0
+	Paths       map[string]map[string]OpenAPIOperation `json:"paths" yaml:"paths"`
+	Components  map[string]interface{}                 `json:"components" yaml:"components"`   // OpenAPI 3.x
+	Definitions map[string]interface{}                 `json:"definitions" yaml:"definitions"` // Swagger 2.0
 }
 
 // OpenAPIServer represents an OpenAPI server definition
 type OpenAPIServer struct {
-	URL         string                    `json:"url"`
-	Description string                    `json:"description,omitempty"`
-	Variables   map[string]ServerVariable `json:"variables,omitempty"`
+	URL         string                    `json:"url" yaml:"url"`
+	Description string                    `json:"description,omitempty" yaml:"description,omitempty"`
+	Variables   map[string]ServerVariable `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
 // ServerVariable represents a server variable
@@ -40,18 +40,18 @@ type ServerVariable struct {
 
 // OpenAPIOperation represents an OpenAPI operation
 type OpenAPIOperation struct {
-	OperationID string                         `json:"operationId"`
-	Summary     string                         `json:"summary,omitempty"`
-	Description string                         `json:"description,omitempty"`
-	Parameters  []OpenAPIParameter             `json:"parameters,omitempty"`
-	RequestBody *OpenAPIRequestBody            `json:"requestBody,omitempty"`
-	Responses   map[string]OpenAPIResponseSpec `json:"responses,omitempty"`
-	Security    []map[string][]string          `json:"security,omitempty"`
-	Tags        []string                       `json:"tags,omitempty"`
+	OperationID string                         `json:"operationId" yaml:"operationId"`
+	Summary     string                         `json:"summary,omitempty" yaml:"summary,omitempty"`
+	Description string                         `json:"description,omitempty" yaml:"description,omitempty"`
+	Parameters  []OpenAPIParameter             `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	RequestBody *OpenAPIRequestBody            `json:"requestBody,omitempty" yaml:"requestBody,omitempty"`
+	Responses   map[string]OpenAPIResponseSpec `json:"responses,omitempty" yaml:"responses,omitempty"`
+	Security    []map[string][]string          `json:"security,omitempty" yaml:"security,omitempty"`
+	Tags        []string                       `json:"tags,omitempty" yaml:"tags,omitempty"`
 
 	// Internal fields for resolved operation
-	Method string `json:"-"` // HTTP method (GET, POST, etc.)
-	Path   string `json:"-"` // URL path template
+	Method string `json:"-" yaml:"-"` // HTTP method (GET, POST, etc.)
+	Path   string `json:"-" yaml:"-"` // URL path template
 }
 
 // OpenAPIParameter represents an OpenAPI parameter

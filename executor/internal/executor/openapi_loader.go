@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 // OpenAPIDocumentLoader interface for loading OpenAPI documents
@@ -68,7 +70,7 @@ func (l *DefaultOpenAPIDocumentLoader) LoadDocument(ctx context.Context, resourc
 	}
 
 	// Set appropriate headers
-	req.Header.Set("Accept", "application/json, application/yaml, text/yaml")
+	req.Header.Set("Accept", "application/json, application/yaml, text/yaml, application/x-yaml, text/x-yaml")
 	req.Header.Set("User-Agent", "flunq-executor/1.0")
 
 	// Execute request
@@ -90,7 +92,13 @@ func (l *DefaultOpenAPIDocumentLoader) LoadDocument(ctx context.Context, resourc
 	}
 
 	// Parse document
-	doc, err := l.parseDocument(body, resp.Header.Get("Content-Type"))
+	contentType := resp.Header.Get("Content-Type")
+	l.logger.Debug("Parsing OpenAPI document",
+		zap.String("endpoint", resource.Endpoint),
+		zap.String("content_type", contentType),
+		zap.Int("content_length", len(body)))
+
+	doc, err := l.parseDocument(body, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OpenAPI document: %w", err)
 	}
@@ -111,16 +119,126 @@ func (l *DefaultOpenAPIDocumentLoader) LoadDocument(ctx context.Context, resourc
 	return doc, nil
 }
 
+// ParseDocument parses the document based on content type (exported for testing)
+func (l *DefaultOpenAPIDocumentLoader) ParseDocument(data []byte, contentType string) (*OpenAPIDocument, error) {
+	return l.parseDocument(data, contentType)
+}
+
 // parseDocument parses the document based on content type
 func (l *DefaultOpenAPIDocumentLoader) parseDocument(data []byte, contentType string) (*OpenAPIDocument, error) {
 	var doc OpenAPIDocument
 
-	// For now, we only support JSON. YAML support can be added later
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON document: %w", err)
+	// Log the first few characters for debugging
+	preview := string(data)
+	if len(preview) > 100 {
+		preview = preview[:100] + "..."
+	}
+	l.logger.Debug("Document content preview",
+		zap.String("content_type", contentType),
+		zap.String("preview", preview),
+		zap.Int("size", len(data)))
+
+	// Determine format based on content type or content analysis
+	isYAML := l.isYAMLContent(data, contentType)
+
+	if isYAML {
+		l.logger.Debug("Parsing OpenAPI document as YAML", zap.String("content_type", contentType))
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			l.logger.Error("YAML parsing failed", zap.Error(err), zap.String("preview", preview))
+			return nil, fmt.Errorf("failed to parse YAML document: %w", err)
+		}
+	} else {
+		l.logger.Debug("Parsing OpenAPI document as JSON", zap.String("content_type", contentType))
+		if err := json.Unmarshal(data, &doc); err != nil {
+			l.logger.Error("JSON parsing failed", zap.Error(err), zap.String("preview", preview))
+			return nil, fmt.Errorf("failed to parse JSON document: %w", err)
+		}
 	}
 
 	return &doc, nil
+}
+
+// IsYAMLContent determines if the content is YAML based on content type and content analysis (exported for testing)
+func (l *DefaultOpenAPIDocumentLoader) IsYAMLContent(data []byte, contentType string) bool {
+	return l.isYAMLContent(data, contentType)
+}
+
+// isYAMLContent determines if the content is YAML based on content type and content analysis
+func (l *DefaultOpenAPIDocumentLoader) isYAMLContent(data []byte, contentType string) bool {
+	// Check content type first
+	contentTypeLower := strings.ToLower(contentType)
+	if strings.Contains(contentTypeLower, "yaml") || strings.Contains(contentTypeLower, "yml") {
+		l.logger.Debug("Detected YAML from content type", zap.String("content_type", contentType))
+		return true
+	}
+
+	// If content type is not definitive, analyze the content
+	content := strings.TrimSpace(string(data))
+
+	// Check if it starts with '{' or '[' (definitely JSON)
+	if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+		l.logger.Debug("Detected JSON from content structure")
+		return false
+	}
+
+	// Check for YAML-specific patterns anywhere in the first few lines
+	lines := strings.Split(content, "\n")
+	maxLinesToCheck := 10
+	if len(lines) < maxLinesToCheck {
+		maxLinesToCheck = len(lines)
+	}
+
+	yamlIndicators := []string{
+		"openapi:",
+		"swagger:",
+		"---",
+		"info:",
+		"paths:",
+		"components:",
+		"servers:",
+	}
+
+	for i := 0; i < maxLinesToCheck; i++ {
+		line := strings.TrimSpace(lines[i])
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Check for YAML patterns
+		for _, pattern := range yamlIndicators {
+			if strings.HasPrefix(line, pattern) {
+				l.logger.Debug("Detected YAML from content pattern", zap.String("pattern", pattern))
+				return true
+			}
+		}
+
+		// Check for YAML-style key-value pairs (key: value)
+		if strings.Contains(line, ":") && !strings.Contains(line, "\"") && !strings.Contains(line, "{") {
+			// This looks like YAML syntax
+			l.logger.Debug("Detected YAML from key-value pattern")
+			return true
+		}
+	}
+
+	// Try parsing as JSON first
+	var jsonTest interface{}
+	if json.Unmarshal(data, &jsonTest) == nil {
+		l.logger.Debug("Successfully parsed as JSON")
+		return false
+	}
+
+	// Try parsing as YAML to confirm
+	var yamlTest interface{}
+	if yaml.Unmarshal(data, &yamlTest) == nil {
+		l.logger.Debug("Successfully parsed as YAML")
+		return true
+	}
+
+	// If both fail, default to JSON (will produce a clear error)
+	l.logger.Debug("Could not determine format, defaulting to JSON")
+	return false
 }
 
 // validateDocument performs basic validation of the OpenAPI/Swagger document

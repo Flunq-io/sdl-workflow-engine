@@ -13,6 +13,7 @@ import { SchemaGenerator } from './schema-generator.js';
 import { ExecutionManager } from './execution-manager.js';
 import { Logger } from './logger.js';
 import { Config } from './config.js';
+import { SERVER_INFO, TOOL_NAMES, MESSAGES } from './constants.js';
 
 class FlunqMcpServer {
   private server: Server;
@@ -25,7 +26,7 @@ class FlunqMcpServer {
 
   constructor() {
     this.config = new Config();
-    this.logger = new Logger();
+    this.logger = new Logger(this.config);
     this.flunqClient = new FlunqApiClient(this.config, this.logger);
     this.schemaGenerator = new SchemaGenerator(this.logger);
     this.discoveryService = new WorkflowDiscoveryService(
@@ -42,8 +43,8 @@ class FlunqMcpServer {
 
     this.server = new Server(
       {
-        name: 'flunq-mcp-server',
-        version: '0.1.0',
+        name: SERVER_INFO.NAME,
+        version: SERVER_INFO.VERSION,
       },
       {
         capabilities: {
@@ -59,14 +60,14 @@ class FlunqMcpServer {
     // List available workflow tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       try {
-        this.logger.info('Discovering workflows...');
+        this.logger.info(MESSAGES.DISCOVERING_WORKFLOWS);
 
-        // Use the working listWorkflowsWithPagination method directly
-        const response = await this.discoveryService.listWorkflowsWithPagination();
-        const workflows = response.items || [];
+        // Use discoverWorkflows with caching for consistency
+        const workflowTools = await this.discoveryService.discoverWorkflows();
+        this.logger.info(`Discovered ${workflowTools.length} workflow tools for listing`);
 
-        const tools: Tool[] = workflows.map(workflow => ({
-          name: `workflow_${workflow.id}`,
+        const tools: Tool[] = workflowTools.map(workflow => ({
+          name: `${TOOL_NAMES.WORKFLOW_PREFIX}${workflow.id}`,
           description: workflow.description || `Execute ${workflow.name} workflow`,
           inputSchema: workflow.inputSchema || {
             type: 'object',
@@ -75,10 +76,10 @@ class FlunqMcpServer {
           },
         }));
 
-        // Debug: Add a tool showing how many workflows were found
+        // Add server status tool
         tools.push({
-          name: 'debug_workflow_count',
-          description: `Found ${workflows.length} workflows for execution`,
+          name: TOOL_NAMES.SERVER_STATUS,
+          description: `Server status: ${workflowTools.length} workflows available`,
           inputSchema: {
             type: 'object',
             properties: {},
@@ -88,7 +89,7 @@ class FlunqMcpServer {
 
         // Add utility tools
         tools.push({
-          name: 'refresh_workflows',
+          name: TOOL_NAMES.REFRESH_WORKFLOWS,
           description: 'Refresh the workflow cache to discover new workflows',
           inputSchema: {
             type: 'object',
@@ -100,7 +101,7 @@ class FlunqMcpServer {
 
 
         tools.push({
-          name: 'list_workflows',
+          name: TOOL_NAMES.LIST_WORKFLOWS,
           description: 'List workflows with filtering and pagination options',
           inputSchema: {
             type: 'object',
@@ -176,22 +177,44 @@ class FlunqMcpServer {
         this.logger.info(`Executing tool: ${name}`, { args });
         this.logger.info(`Tool name received: "${name}" (length: ${name.length})`);
 
-        // Handle refresh tool
-        if (name === 'refresh_workflows') {
-          this.discoveryService.clearCache();
+        // Handle server status tool
+        if (name === TOOL_NAMES.SERVER_STATUS) {
           const workflows = await this.discoveryService.discoverWorkflows();
+          const status = {
+            server: SERVER_INFO.NAME,
+            version: SERVER_INFO.VERSION,
+            timestamp: new Date().toISOString(),
+            config: this.config.toObject(),
+            workflows: {
+              count: workflows.length,
+              tenant: this.config.defaultTenant,
+            },
+          };
           return {
             content: [
               {
                 type: 'text',
-                text: `UNIQUE TEST 12345 - Found ${workflows.length} workflows at ${new Date().toISOString()}.`,
+                text: JSON.stringify(status, null, 2),
+              },
+            ],
+          };
+        }
+
+        // Handle refresh tool
+        if (name === TOOL_NAMES.REFRESH_WORKFLOWS) {
+          const workflows = await this.discoveryService.forceRefreshWorkflows();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `${MESSAGES.WORKFLOW_CACHE_REFRESHED}. Found ${workflows.length} workflows at ${new Date().toISOString()}.`,
               },
             ],
           };
         }
 
         // Handle list workflows tool
-        if (name === 'list_workflows') {
+        if (name === TOOL_NAMES.LIST_WORKFLOWS) {
           const response = await this.discoveryService.listWorkflowsWithPagination(args);
           return {
             content: [
@@ -203,12 +226,46 @@ class FlunqMcpServer {
           };
         }
 
-        // Handle test execution tool
-        if (name === 'execute_purchase_requisition') {
+
+
+        // Extract workflow ID from tool name
+        const workflowId = name.replace(new RegExp(`^${TOOL_NAMES.WORKFLOW_PREFIX}`), '');
+        this.logger.info(`Extracted workflow ID: "${workflowId}" from tool name: "${name}"`);
+
+        // Use smart refresh to balance performance and freshness
+        const workflows = await this.discoveryService.smartRefreshIfNeeded();
+
+        this.logger.info(`Available workflows: ${workflows.map(w => w.id).join(', ')}`);
+
+        const workflow = workflows.find(w => w.id === workflowId);
+
+        if (!workflow) {
+          this.logger.warn(`Workflow not found in cache: ${workflowId}. Attempting force refresh...`);
+
+          // Try force refresh as fallback
+          const freshWorkflows = await this.discoveryService.forceRefreshWorkflows();
+          const freshWorkflow = freshWorkflows.find(w => w.id === workflowId);
+
+          if (!freshWorkflow) {
+            this.logger.error(`Workflow not found even after refresh: ${workflowId}. Available workflows: ${freshWorkflows.map(w => w.id).join(', ')}`);
+            throw new Error(`Workflow not found: ${workflowId}. Available workflows: ${freshWorkflows.map(w => w.id).join(', ')}`);
+          }
+
+          this.logger.info(`Found workflow after refresh: ${freshWorkflow.name} (${freshWorkflow.id})`);
+
+          // Validate input against schema
+          if (freshWorkflow.inputSchema) {
+            this.schemaGenerator.validateInput(args || {}, freshWorkflow.inputSchema);
+          }
+
+          // Execute workflow
           const result = await this.executionManager.executeWorkflow(
-            'wf_28c0d892-aa31-47',
+            freshWorkflow.id,
             args || {}
           );
+
+          this.logger.info(`Tool execution completed: ${name}`, { result });
+
           return {
             content: [
               {
@@ -219,16 +276,7 @@ class FlunqMcpServer {
           };
         }
 
-        // Extract workflow ID from tool name
-        const workflowId = name.replace(/^workflow_/, '');
-
-        // Find the workflow by ID
-        const workflows = await this.discoveryService.discoverWorkflows();
-        const workflow = workflows.find(w => w.id === workflowId);
-
-        if (!workflow) {
-          throw new Error(`Workflow not found: ${workflowId}`);
-        }
+        this.logger.info(`Found workflow: ${workflow.name} (${workflow.id})`);
 
         // Validate input against schema
         if (workflow.inputSchema) {
@@ -270,7 +318,7 @@ class FlunqMcpServer {
   async start(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    this.logger.info('Flunq MCP Server started - DEBUG VERSION WITH LOGGING');
+    this.logger.info(MESSAGES.SERVER_STARTED);
   }
 }
 

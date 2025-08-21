@@ -41,8 +41,9 @@ AI Model → MCP Client → MCP Server → flunq.io API → Workflow Engine
 
 ### **Cache Management**
 - **Manual Refresh**: `refresh_workflows` tool for immediate cache updates
-- **Fast TTL**: 30-second cache expiry for development
-- **Automatic Discovery**: New workflows appear within 30 seconds or on manual refresh
+- **Configurable TTL**: Cache expiry configurable via `FLUNQ_CACHE_TTL` environment variable
+- **Automatic Discovery**: New workflows appear after cache expiry or on manual refresh
+- **Smart Caching**: Cache is automatically cleared during tool execution to ensure latest workflows
 
 ### **Multi-Tenant Support**
 - **Tenant Isolation**: Proper tenant scoping for workflow discovery and execution
@@ -76,6 +77,20 @@ Each workflow is exposed as an MCP tool using the workflow ID for reliable ident
 
 The server also provides utility tools:
 
+#### **Server Status Tool**
+```json
+{
+  "name": "server_status",
+  "description": "Server status: X workflows available",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}
+```
+
+#### **Refresh Workflows Tool**
 ```json
 {
   "name": "refresh_workflows",
@@ -86,15 +101,21 @@ The server also provides utility tools:
     "additionalProperties": false
   }
 }
-        "type": "string",
-        "description": "User first name"
-      },
-      "lastName": {
-        "type": "string",
-        "description": "User last name"
-      }
+```
+
+#### **List Workflows Tool**
+```json
+{
+  "name": "list_workflows",
+  "description": "List workflows with filtering and pagination options",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "page": { "type": "number", "description": "Page number (1-based)" },
+      "size": { "type": "number", "description": "Number of items per page" },
+      "search": { "type": "string", "description": "Search across workflow name, description, and tags" }
     },
-    "required": ["email", "firstName", "lastName"]
+    "additionalProperties": false
   }
 }
 ```
@@ -159,23 +180,104 @@ docker run -d \
 
 ## 📊 **Configuration**
 
-```yaml
-# mcp-config.yaml
-server:
-  host: "localhost"
-  port: 3001
-  
-flunq:
-  api_url: "http://localhost:8080"
-  default_tenant: "default"
-  
-discovery:
-  cache_ttl: 300  # 5 minutes
-  auto_refresh: true
-  
-execution:
-  timeout: 300    # 5 minutes
-  poll_interval: 2 # 2 seconds
+Configuration is managed through environment variables. Copy `.env.example` to `.env` and customize:
+
+```bash
+# Flunq.io API Configuration
+FLUNQ_API_URL=http://localhost:8080
+FLUNQ_DEFAULT_TENANT=acme-inc
+FLUNQ_REQUEST_TIMEOUT=30000
+
+# Execution Configuration
+FLUNQ_EXECUTION_TIMEOUT=300  # 5 minutes
+FLUNQ_POLL_INTERVAL=2        # 2 seconds
+
+# Cache Configuration
+FLUNQ_CACHE_ENABLED=true
+FLUNQ_CACHE_TTL=300          # 5 minutes
+
+# Logging Configuration
+LOG_LEVEL=info               # debug, info, warn, error
+LOG_FORMAT=json              # json, simple
+```
+
+### **Configuration Options**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FLUNQ_API_URL` | `http://localhost:8080` | Base URL for flunq.io API |
+| `FLUNQ_DEFAULT_TENANT` | `acme-inc` | Default tenant for workflow operations |
+| `FLUNQ_REQUEST_TIMEOUT` | `30000` | HTTP request timeout in milliseconds |
+| `FLUNQ_EXECUTION_TIMEOUT` | `300` | Workflow execution timeout in seconds |
+| `FLUNQ_POLL_INTERVAL` | `2` | Execution status polling interval in seconds |
+| `FLUNQ_CACHE_ENABLED` | `true` | Enable/disable workflow caching |
+| `FLUNQ_CACHE_TTL` | `300` | Cache time-to-live in seconds |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| `LOG_FORMAT` | `json` | Log format (json, simple) |
+
+## 🧪 **Testing**
+
+### **Quick Test**
+```bash
+# Test the MCP server functionality
+npm run test:server
+```
+
+This will verify:
+- ✅ MCP protocol initialization
+- ✅ Tool discovery and listing
+- ✅ Server status and configuration
+- ✅ Workflow count and availability
+
+### **Manual Testing with Claude Desktop**
+
+1. **Add to Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "flunq": {
+      "command": "node",
+      "args": ["/path/to/flunq.io/mcp/dist/index.js"],
+      "env": {
+        "FLUNQ_API_URL": "http://localhost:8080",
+        "FLUNQ_DEFAULT_TENANT": "acme-inc"
+      }
+    }
+  }
+}
+```
+
+2. **Restart Claude Desktop**
+
+3. **Test workflow discovery**: Ask Claude to list available tools
+
+4. **Test workflow execution**: Ask Claude to execute a specific workflow
+
+## 🔧 **Troubleshooting**
+
+### **Common Issues**
+
+| Issue | Solution |
+|-------|----------|
+| "Tool not available" error | Run `refresh_workflows` tool or check cache TTL |
+| Connection timeout | Verify `FLUNQ_API_URL` and network connectivity |
+| No workflows found | Check tenant configuration and API permissions |
+| Schema validation errors | Verify workflow input schema matches expected format |
+
+### **Debug Mode**
+```bash
+# Enable debug logging
+export LOG_LEVEL=debug
+npm run dev
+```
+
+### **Health Check**
+```bash
+# Check if flunq.io API is accessible
+curl http://localhost:8080/health
+
+# Test workflow listing
+curl http://localhost:8080/api/v1/acme-inc/workflows
 ```
 
 ## 🎯 **Usage Examples**

@@ -1,11 +1,12 @@
 import winston from 'winston';
+import { Config } from './config.js';
 
 export class Logger {
   private logger: winston.Logger;
 
-  constructor() {
-    const logLevel = process.env.LOG_LEVEL || 'info';
-    const logFormat = process.env.LOG_FORMAT || 'json';
+  constructor(config?: Config) {
+    const logLevel = config?.logLevel || process.env.LOG_LEVEL || 'info';
+    const logFormat = config?.logFormat || process.env.LOG_FORMAT || 'json';
 
     this.logger = winston.createLogger({
       level: logLevel,

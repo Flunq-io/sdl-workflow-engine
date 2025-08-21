@@ -282,11 +282,11 @@ func TestCallTaskExecutorOpenAPI(t *testing.T) {
 	assert.True(t, result.Success)
 	assert.Equal(t, 200, result.Output["status_code"])
 
-	// Check that the response data is properly parsed
-	data, ok := result.Output["data"].(map[string]interface{})
+	// Check that the response content is properly parsed
+	content, ok := result.Output["content"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "123", data["id"])
-	assert.Equal(t, "Fluffy", data["name"])
+	assert.Equal(t, "123", content["id"])
+	assert.Equal(t, "Fluffy", content["name"])
 }
 
 func TestCallTaskExecutorHTTP(t *testing.T) {
@@ -403,4 +403,199 @@ func TestSwagger2Support(t *testing.T) {
 	assert.Equal(t, "GET", operation.Method)
 	assert.Equal(t, "/pet/findByStatus", operation.Path)
 	assert.Equal(t, "https://petstore.swagger.io/v2", operation.BaseURL)
+}
+
+func TestCallTaskExecutorOpenAPIError(t *testing.T) {
+	var server *httptest.Server
+
+	// Create test server that serves both OpenAPI doc and API endpoints
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi.json" {
+			// Serve OpenAPI document
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			doc := map[string]interface{}{
+				"openapi": "3.0.0",
+				"info": map[string]interface{}{
+					"title":   "Test API",
+					"version": "1.0.0",
+				},
+				"servers": []map[string]interface{}{
+					{"url": server.URL},
+				},
+				"paths": map[string]interface{}{
+					"/error": map[string]interface{}{
+						"get": map[string]interface{}{
+							"operationId": "getError",
+							"summary":     "Get error",
+							"responses": map[string]interface{}{
+								"500": map[string]interface{}{
+									"description": "Internal server error",
+								},
+							},
+						},
+					},
+				},
+			}
+			json.NewEncoder(w).Encode(doc)
+		} else if r.URL.Path == "/error" {
+			// Serve error response
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			errorResponse := map[string]interface{}{
+				"error":   "Internal server error",
+				"code":    "SERVER_ERROR",
+				"details": "Database connection failed",
+			}
+			json.NewEncoder(w).Encode(errorResponse)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	logger := zap.NewNop()
+	executor := NewCallTaskExecutor(logger)
+
+	// Create task request for OpenAPI call that will return 500 error
+	task := &TaskRequest{
+		TaskID:      "test-error-task",
+		TaskName:    "errorCall",
+		TaskType:    "call",
+		WorkflowID:  "test-workflow",
+		ExecutionID: "test-execution",
+		Config: &TaskConfig{
+			Parameters: map[string]interface{}{
+				"call_type":    "openapi",
+				"document":     map[string]interface{}{"endpoint": server.URL + "/openapi.json"},
+				"operation_id": "getError",
+				"output":       "content",
+			},
+		},
+	}
+
+	// Execute the task
+	ctx := context.Background()
+	result, err := executor.Execute(ctx, task)
+
+	// Should not return an error at the executor level
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Should be marked as unsuccessful due to HTTP 500
+	assert.False(t, result.Success)
+	assert.Equal(t, 500, result.Output["status_code"])
+
+	// Should contain the error response content
+	content, ok := result.Output["content"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Internal server error", content["error"])
+	assert.Equal(t, "SERVER_ERROR", content["code"])
+	assert.Equal(t, "Database connection failed", content["details"])
+
+	// Should have error message in the result
+	assert.NotEmpty(t, result.Error)
+	assert.Contains(t, result.Error, "500")
+}
+
+func TestCallTaskExecutorParameterEvaluation(t *testing.T) {
+	var server *httptest.Server
+
+	// Create test server that serves both OpenAPI doc and API endpoints
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi.json" {
+			// Serve OpenAPI document
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			doc := map[string]interface{}{
+				"openapi": "3.0.0",
+				"info": map[string]interface{}{
+					"title":   "Test API",
+					"version": "1.0.0",
+				},
+				"servers": []map[string]interface{}{
+					{"url": server.URL},
+				},
+				"paths": map[string]interface{}{
+					"/search": map[string]interface{}{
+						"get": map[string]interface{}{
+							"operationId": "searchItems",
+							"summary":     "Search items",
+							"parameters": []map[string]interface{}{
+								{
+									"name":     "query",
+									"in":       "query",
+									"required": true,
+									"schema":   map[string]interface{}{"type": "string"},
+								},
+							},
+							"responses": map[string]interface{}{
+								"200": map[string]interface{}{
+									"description": "Search results",
+								},
+							},
+						},
+					},
+				},
+			}
+			json.NewEncoder(w).Encode(doc)
+		} else if r.URL.Path == "/search" {
+			// Check that the query parameter was properly evaluated
+			query := r.URL.Query().Get("query")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			response := map[string]interface{}{
+				"query":   query,
+				"results": []string{"item1", "item2"},
+			}
+			json.NewEncoder(w).Encode(response)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	logger := zap.NewNop()
+	executor := NewCallTaskExecutor(logger)
+
+	// Create task request with expression in parameters
+	task := &TaskRequest{
+		TaskID:      "test-param-eval-task",
+		TaskName:    "searchCall",
+		TaskType:    "call",
+		WorkflowID:  "test-workflow",
+		ExecutionID: "test-execution",
+		Input: map[string]interface{}{
+			"searchTerm": "Dell laptop",
+		},
+		Config: &TaskConfig{
+			Parameters: map[string]interface{}{
+				"call_type":    "openapi",
+				"document":     map[string]interface{}{"endpoint": server.URL + "/openapi.json"},
+				"operation_id": "searchItems",
+				"parameters": map[string]interface{}{
+					"query": "${ .input.searchTerm }", // Expression to be evaluated
+				},
+				"output": "content",
+			},
+		},
+	}
+
+	// Execute the task
+	ctx := context.Background()
+	result, err := executor.Execute(ctx, task)
+
+	// Should not return an error at the executor level
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Should be successful
+	assert.True(t, result.Success)
+	assert.Equal(t, 200, result.Output["status_code"])
+
+	// Should contain the response with the evaluated parameter
+	content, ok := result.Output["content"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Dell laptop", content["query"]) // The expression should have been evaluated
+	assert.NotNil(t, content["results"])
 }

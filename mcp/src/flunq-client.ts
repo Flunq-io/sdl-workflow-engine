@@ -8,7 +8,6 @@ export interface Workflow {
   description: string;
   tenant_id: string;
   definition: any;
-  inputSchema?: any;
   state: string;
   tags: string[];
   created_at: string;

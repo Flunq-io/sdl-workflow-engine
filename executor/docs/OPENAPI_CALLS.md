@@ -64,8 +64,8 @@ do:
   - findPets:
       call: openapi
       with:
-        document: 
-          endpoint: https://petstore.swagger.io/v2/swagger.json
+        document:
+          endpoint: https://petstore.swagger.io/v2/swagger.json  # JSON format
         operationId: findPetsByStatus
         parameters:
           status: available
@@ -138,6 +138,28 @@ do:
             token: ${ .authToken }
 ```
 
+### **Example 4: Using YAML OpenAPI Document**
+
+```yaml
+# Workflow DSL - Using YAML OpenAPI specification
+do:
+  - getUser:
+      call: openapi
+      with:
+        document:
+          endpoint: https://api.example.com/openapi.yaml  # YAML format
+        operationId: getUserById
+        parameters:
+          userId: ${ .userId }
+        output: content
+```
+
+**Benefits of YAML support:**
+- ✅ **Automatic Detection**: Format detected based on content type and file extension
+- ✅ **Content Analysis**: Falls back to content analysis if content type is unclear
+- ✅ **Same Functionality**: All OpenAPI features work with both JSON and YAML
+- ✅ **Error Handling**: Clear error messages for parsing issues
+
 ## 🔧 Configuration Options
 
 ### **Document Reference**
@@ -151,10 +173,11 @@ do:
 ```
 
 **Supported formats:**
-- JSON OpenAPI documents
-- YAML support (planned for future release)
-- HTTP/HTTPS endpoints
-- Document caching (5-minute default TTL)
+- ✅ JSON OpenAPI documents (`.json`)
+- ✅ YAML OpenAPI documents (`.yaml`, `.yml`)
+- ✅ HTTP/HTTPS endpoints
+- ✅ Document caching (5-minute default TTL)
+- ✅ Automatic format detection based on content type and content analysis
 
 ### **Authentication Types**
 
@@ -368,6 +391,53 @@ Each response includes request metadata:
 - Efficient JSON parsing and processing
 - Minimal memory footprint for cached documents
 - Garbage collection friendly design
+
+## 🔍 **Format Detection & Troubleshooting**
+
+### **How Format Detection Works**
+
+The executor automatically detects whether your OpenAPI document is JSON or YAML using:
+
+1. **Content-Type Header**: Checks for `application/yaml`, `text/yaml`, etc.
+2. **Content Analysis**: Looks for YAML-specific patterns:
+   - `openapi:` or `swagger:` at the start
+   - YAML document separator `---`
+   - Key-value patterns like `info:`, `paths:`
+3. **JSON Fallback**: If content starts with `{`, assumes JSON
+4. **Parse Attempt**: If JSON parsing fails, tries YAML
+
+### **Troubleshooting YAML Issues**
+
+| Issue | Solution |
+|-------|----------|
+| "Failed to parse YAML document" | Check YAML syntax with a validator |
+| "Failed to parse JSON document" | Ensure proper JSON formatting |
+| Wrong format detected | Set explicit `Content-Type` header on your server |
+| Mixed format errors | Ensure document is consistently JSON or YAML |
+
+### **Best Practices**
+
+- ✅ **Use proper file extensions**: `.json` for JSON, `.yaml`/`.yml` for YAML
+- ✅ **Set correct Content-Type**: Server should return appropriate MIME type
+- ✅ **Validate syntax**: Use online validators before deployment
+- ✅ **Check logs**: Enable debug logging to see format detection results
+
+### **Debug Logging**
+
+Enable debug logging to see format detection:
+```bash
+LOG_LEVEL=debug ./executor
+```
+
+Example debug output:
+```json
+{
+  "level": "debug",
+  "msg": "Parsing OpenAPI document as YAML",
+  "content_type": "application/yaml",
+  "endpoint": "https://api.example.com/openapi.yaml"
+}
+```
 
 ## 🔗 Related Documentation
 

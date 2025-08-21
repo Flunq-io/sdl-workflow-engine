@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,9 +27,37 @@ func NewWorkflowHandler(workflowService *services.WorkflowService, logger *zap.L
 
 // Create handles POST /api/v1/workflows
 func (h *WorkflowHandler) Create(c *gin.Context) {
+	// First, check for deprecated inputSchema field in raw JSON
+	var rawRequest map[string]interface{}
+	if err := c.ShouldBindJSON(&rawRequest); err != nil {
+		h.logger.Error("Failed to bind raw create workflow request", zap.Error(err))
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			models.MessageValidationFailed,
+		).WithDetails(map[string]interface{}{
+			"validation_error": err.Error(),
+		}).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Check for deprecated inputSchema field
+	if _, hasInputSchema := rawRequest["inputSchema"]; hasInputSchema {
+		h.logger.Warn("Deprecated inputSchema field detected in request")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			models.ErrorCodeValidation,
+			"The 'inputSchema' field is deprecated. Please define input schema in the workflow definition using SDL 1.0.0 format under the 'input:' section.",
+		).WithDetails(map[string]interface{}{
+			"deprecated_field": "inputSchema",
+			"migration_guide":  "https://github.com/serverlessworkflow/specification/blob/main/dsl-reference.md#input",
+		}).WithRequestID(getRequestID(c)))
+		return
+	}
+
+	// Convert raw request to typed request
 	var req models.CreateWorkflowRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Error("Failed to bind create workflow request", zap.Error(err))
+	reqBytes, _ := json.Marshal(rawRequest)
+	if err := json.Unmarshal(reqBytes, &req); err != nil {
+		h.logger.Error("Failed to convert to typed request", zap.Error(err))
 		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
 			models.ErrorCodeValidation,
 			models.MessageValidationFailed,

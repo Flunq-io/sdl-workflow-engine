@@ -73,14 +73,45 @@ func (e *CallTaskExecutor) Execute(ctx context.Context, task *TaskRequest) (*Tas
 
 // executeOpenAPICall executes an OpenAPI call
 func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskRequest, config *CallConfig, startTime time.Time) (*TaskResult, error) {
-	e.logger.Info("Executing OpenAPI call",
+	e.logger.Info("🚀 EXECUTING OPENAPI CALL WITH NEW CODE",
 		zap.String("task_id", task.TaskID),
 		zap.String("operation_id", config.OperationID),
-		zap.String("document", config.Document.Endpoint))
+		zap.String("document", config.Document.Endpoint),
+		zap.Any("task_input", task.Input),
+		zap.Any("config_parameters", config.Parameters))
+
+	// Evaluate expressions in parameters before executing
+	e.logger.Debug("Evaluating parameter expressions",
+		zap.String("task_id", task.TaskID),
+		zap.Any("original_parameters", config.Parameters))
+
+	evaluatedConfig, err := e.evaluateParameterExpressions(config, task)
+	if err != nil {
+		return e.createErrorResult(task, startTime, fmt.Sprintf("failed to evaluate parameter expressions: %v", err))
+	}
+
+	e.logger.Debug("Parameter expressions evaluated",
+		zap.String("task_id", task.TaskID),
+		zap.Any("evaluated_parameters", evaluatedConfig.Parameters))
 
 	// Execute OpenAPI operation
-	response, err := e.openAPIClient.ExecuteOperation(ctx, config)
-	if err != nil {
+	response, err := e.openAPIClient.ExecuteOperation(ctx, evaluatedConfig)
+
+	// Log the response details for debugging
+	if response != nil {
+		e.logger.Debug("OpenAPI response received",
+			zap.String("task_id", task.TaskID),
+			zap.Int("status_code", response.StatusCode),
+			zap.Any("headers", response.Headers),
+			zap.String("content_preview", fmt.Sprintf("%.200s", response.Body)))
+	}
+
+	// Handle the case where we have a response but also an error (HTTP error status)
+	if err != nil && response == nil {
+		// True error case - no response received
+		e.logger.Error("OpenAPI operation failed with no response",
+			zap.String("task_id", task.TaskID),
+			zap.Error(err))
 		return e.createErrorResult(task, startTime, fmt.Sprintf("OpenAPI operation failed: %v", err))
 	}
 
@@ -125,7 +156,14 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 	// Apply output transformation if configured
 	finalOutput := e.applyOutputTransformation(task, output)
 
-	return &TaskResult{
+	// Log the final output for debugging
+	e.logger.Debug("OpenAPI call final output",
+		zap.String("task_id", task.TaskID),
+		zap.Bool("success", success),
+		zap.Any("final_output", finalOutput))
+
+	// Create the task result
+	result := &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
 		TaskType:    task.TaskType,
@@ -137,7 +175,18 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		Duration:    duration,
 		StartedAt:   startTime,
 		ExecutedAt:  time.Now(),
-	}, nil
+	}
+
+	// If we had an HTTP error, include the error details but still return the response
+	if err != nil {
+		result.Error = err.Error()
+		e.logger.Warn("OpenAPI call returned HTTP error but response data is available",
+			zap.String("task_id", task.TaskID),
+			zap.Int("status_code", response.StatusCode),
+			zap.Error(err))
+	}
+
+	return result, nil
 }
 
 // executeHTTPCall executes a direct HTTP call (backward compatibility)
@@ -555,6 +604,105 @@ func (e *CallTaskExecutor) splitPathWithArrays(path string) []string {
 	}
 
 	return parts
+}
+
+// evaluateParameterExpressions evaluates expressions in OpenAPI parameters using task input
+func (e *CallTaskExecutor) evaluateParameterExpressions(config *CallConfig, task *TaskRequest) (*CallConfig, error) {
+	e.logger.Debug("Starting parameter expression evaluation",
+		zap.String("task_id", task.TaskID),
+		zap.Any("task_input", task.Input),
+		zap.Any("config_parameters", config.Parameters))
+
+	// Create a copy of the config to avoid modifying the original
+	evaluatedConfig := *config
+
+	// Create evaluation context from workflow context
+	evalContext := make(map[string]interface{})
+
+	// Check if workflow context is available
+	if task.Context != nil {
+		e.logger.Debug("Task context available",
+			zap.String("task_id", task.TaskID),
+			zap.Any("task_context", task.Context))
+
+		// Use workflow execution input as the primary input context
+		if workflowInput, exists := task.Context["workflow_input"]; exists {
+			evalContext["input"] = workflowInput
+			e.logger.Debug("Using workflow execution input for expression evaluation",
+				zap.String("task_id", task.TaskID),
+				zap.Any("workflow_input", workflowInput))
+		} else {
+			// Fallback to task input if no workflow input available
+			evalContext["input"] = task.Input
+			e.logger.Debug("No workflow input found, using task input",
+				zap.String("task_id", task.TaskID),
+				zap.Any("task_input", task.Input))
+		}
+
+		// Add workflow variables to evaluation context
+		if variables, exists := task.Context["variables"]; exists {
+			evalContext["variables"] = variables
+			e.logger.Debug("Added workflow variables to evaluation context",
+				zap.String("task_id", task.TaskID),
+				zap.Any("variables", variables))
+		}
+
+		// Add previous task outputs to evaluation context
+		if taskOutputs, exists := task.Context["task_outputs"]; exists {
+			evalContext["task_outputs"] = taskOutputs
+			e.logger.Debug("Added task outputs to evaluation context",
+				zap.String("task_id", task.TaskID),
+				zap.Any("task_outputs", taskOutputs))
+		}
+	} else {
+		// No context, use task input as fallback
+		evalContext["input"] = task.Input
+		e.logger.Debug("No task context available, using task input",
+			zap.String("task_id", task.TaskID),
+			zap.Any("task_input", task.Input))
+	}
+
+	e.logger.Debug("Created evaluation context",
+		zap.String("task_id", task.TaskID),
+		zap.Any("eval_context", evalContext))
+
+	// Evaluate expressions in parameters
+	if config.Parameters != nil {
+		evaluatedParams := make(map[string]interface{})
+
+		for key, value := range config.Parameters {
+			if strValue, ok := value.(string); ok {
+				// Check if this is an expression
+				if strings.HasPrefix(strValue, "${") && strings.HasSuffix(strValue, "}") {
+					// Evaluate the expression
+					evaluatedValue, err := e.evaluateExpression(strValue, evalContext)
+					if err != nil {
+						e.logger.Warn("Failed to evaluate parameter expression, using original value",
+							zap.String("parameter", key),
+							zap.String("expression", strValue),
+							zap.Error(err))
+						evaluatedParams[key] = value // Use original value if evaluation fails
+					} else {
+						evaluatedParams[key] = evaluatedValue
+						e.logger.Debug("Evaluated parameter expression",
+							zap.String("parameter", key),
+							zap.String("expression", strValue),
+							zap.Any("result", evaluatedValue))
+					}
+				} else {
+					// Not an expression, use as-is
+					evaluatedParams[key] = value
+				}
+			} else {
+				// Not a string, use as-is
+				evaluatedParams[key] = value
+			}
+		}
+
+		evaluatedConfig.Parameters = evaluatedParams
+	}
+
+	return &evaluatedConfig, nil
 }
 
 // getMapKeys returns the keys of a map for debugging

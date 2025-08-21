@@ -1,0 +1,76 @@
+document:
+  dsl: '1.0.0'
+  namespace: flunq.catalog
+  name: catalog-search-with-sdl-input
+  version: '1.0.0'
+  summary: Search catalog items using SDL input schema
+  description: |
+    This workflow demonstrates how to use SDL 1.0.0 input schema format
+    instead of a separate inputSchema field. The input schema is defined
+    directly in the workflow definition following the Serverless Workflow
+    specification.
+
+# Input schema defined in SDL format
+input:
+  searchTerm:
+    type: string
+    description: The search term to look for in the catalog
+    minLength: 1
+    maxLength: 100
+  category:
+    type: string
+    description: Optional category filter
+    enum: ["laptops", "desktops", "accessories"]
+  maxResults:
+    type: integer
+    description: Maximum number of results to return
+    minimum: 1
+    maximum: 100
+    default: 10
+
+# Output schema (optional)
+output:
+  catalogItems:
+    type: array
+    description: Array of catalog items matching the search criteria
+    items:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+
+do:
+  - name: findCatalogItems
+    type: operation
+    actions:
+      - name: searchCatalog
+        operation:
+          service:
+            name: catalogService
+            operation: searchItems
+        args:
+          searchTerm: ${ .input.searchTerm }
+          category: ${ .input.category }
+          limit: ${ .input.maxResults }
+        results: catalogItems
+
+  - name: returnResults
+    type: operation
+    actions:
+      - name: formatResults
+        operation:
+          service:
+            name: responseService
+            operation: formatCatalogResponse
+        args:
+          items: ${ .catalogItems }
+          searchTerm: ${ .input.searchTerm }
+        results: formattedResults

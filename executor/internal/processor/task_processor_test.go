@@ -68,11 +68,7 @@ func TestPublishTaskCompletedEvent(t *testing.T) {
 	mockStream := new(MockEventStream)
 	logger := zap.NewNop()
 
-	processor := &TaskProcessor{
-		eventStream:   mockStream,
-		taskExecutors: map[string]executor.TaskExecutor{},
-		logger:        logger,
-	}
+	processor := NewTaskProcessor(mockStream, logger)
 
 	// Create a task result with WorkflowID and ExecutionID
 	taskResult := &executor.TaskResult{

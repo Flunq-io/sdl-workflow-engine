@@ -85,7 +85,6 @@ func (a *WorkflowAdapter) toSharedWorkflowDefinition(workflow *models.Workflow) 
 		Version:     "1.0.0", // Default version if not specified
 		SpecVersion: "1.0.0", // Default spec version
 		Definition:  workflow.Definition,
-		InputSchema: workflow.InputSchema,
 		CreatedAt:   workflow.CreatedAt,
 		UpdatedAt:   workflow.UpdatedAt,
 		CreatedBy:   "api", // TODO: Get from authentication context
@@ -101,7 +100,6 @@ func (a *WorkflowAdapter) toAPIWorkflow(sharedWorkflow *interfaces.WorkflowDefin
 		Description: sharedWorkflow.Description,
 		TenantID:    sharedWorkflow.TenantID,
 		Definition:  sharedWorkflow.Definition,
-		InputSchema: sharedWorkflow.InputSchema,
 		State:       models.WorkflowStateActive, // Default state
 		Tags:        []string{},                 // TODO: Add tags support to shared interface
 		CreatedAt:   sharedWorkflow.CreatedAt,

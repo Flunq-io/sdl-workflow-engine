@@ -2,6 +2,7 @@ import { FlunqApiClient, Workflow, WorkflowListParams, WorkflowListResponse } fr
 import { SchemaGenerator } from './schema-generator.js';
 import { Logger } from './logger.js';
 import { Config } from './config.js';
+import { MESSAGES } from './constants.js';
 
 export interface WorkflowTool {
   id: string;
@@ -24,7 +25,7 @@ export class WorkflowDiscoveryService {
   private config: Config;
   private cache: Map<string, WorkflowTool[]> = new Map();
   private cacheExpiry: Map<string, number> = new Map();
-  private readonly CACHE_TTL = 30 * 1000; // 30 seconds for development
+  private lastRefreshTime: Map<string, number> = new Map();
 
   constructor(
     flunqClient: FlunqApiClient,
@@ -68,7 +69,8 @@ export class WorkflowDiscoveryService {
 
       // Cache the results
       this.cache.set(cacheKey, tools);
-      this.cacheExpiry.set(cacheKey, Date.now() + this.CACHE_TTL);
+      this.cacheExpiry.set(cacheKey, Date.now() + (this.config.cacheTtl * 1000));
+      this.lastRefreshTime.set(cacheKey, Date.now());
 
       this.logger.info(`Discovered ${tools.length} workflow tools for tenant: ${tenant}`);
       return tools;
@@ -83,8 +85,8 @@ export class WorkflowDiscoveryService {
   private async convertWorkflowToTool(workflow: Workflow): Promise<WorkflowTool> {
     this.logger.debug(`Converting workflow to tool: ${workflow.name}`);
 
-    // Use workflow's inputSchema if available, otherwise generate from definition
-    const inputSchema = workflow.inputSchema || this.schemaGenerator.generateInputSchema(workflow.definition);
+    // Generate input schema from SDL definition
+    const inputSchema = this.schemaGenerator.generateInputSchema(workflow.definition);
 
     // Generate output schema (optional)
     const outputSchema = this.schemaGenerator.generateOutputSchema(workflow.definition);
@@ -141,16 +143,59 @@ export class WorkflowDiscoveryService {
       const cacheKey = `workflows:${tenantId}`;
       this.cache.delete(cacheKey);
       this.cacheExpiry.delete(cacheKey);
+      this.lastRefreshTime.delete(cacheKey);
     } else {
       this.cache.clear();
       this.cacheExpiry.clear();
+      this.lastRefreshTime.clear();
     }
-    this.logger.info('Workflow cache cleared');
+    this.logger.info(MESSAGES.WORKFLOW_CACHE_CLEARED);
   }
 
   async refreshWorkflows(tenantId?: string): Promise<WorkflowTool[]> {
     this.clearCache(tenantId);
     return this.discoverWorkflows(tenantId);
+  }
+
+  /**
+   * Force refresh workflows, bypassing cache entirely
+   * Use this only when you need to ensure the absolute latest workflow list
+   */
+  async forceRefreshWorkflows(tenantId?: string): Promise<WorkflowTool[]> {
+    const tenant = tenantId || this.config.defaultTenant;
+    const cacheKey = `workflows:${tenant}`;
+
+    try {
+      this.logger.info(`Force refreshing workflows for tenant: ${tenant}`);
+
+      // Fetch workflows from flunq.io API
+      const workflows = await this.flunqClient.listWorkflows(tenant);
+
+      // Convert workflows to MCP tools
+      const tools: WorkflowTool[] = [];
+
+      for (const workflow of workflows) {
+        try {
+          const tool = await this.convertWorkflowToTool(workflow);
+          tools.push(tool);
+        } catch (error) {
+          this.logger.warn(`Failed to convert workflow ${workflow.id} to tool:`, error);
+        }
+      }
+
+      // Update cache with fresh results
+      this.cache.set(cacheKey, tools);
+      this.cacheExpiry.set(cacheKey, Date.now() + (this.config.cacheTtl * 1000));
+      this.lastRefreshTime.set(cacheKey, Date.now());
+
+      this.logger.info(`Force refreshed ${tools.length} workflow tools for tenant: ${tenant}`);
+      return tools;
+    } catch (error) {
+      this.logger.error(`Failed to force refresh workflows for tenant ${tenant}:`, error);
+
+      // Return cached results if available, even if expired
+      return this.cache.get(cacheKey) || [];
+    }
   }
 
   async listWorkflowsWithPagination(params?: WorkflowListParams): Promise<WorkflowListResponse> {
@@ -195,5 +240,33 @@ export class WorkflowDiscoveryService {
         },
       };
     }
+  }
+
+  /**
+   * Smart refresh that checks if we should refresh based on recent activity
+   * This helps ensure new workflows are discovered quickly without being too aggressive
+   */
+  async smartRefreshIfNeeded(tenantId?: string): Promise<WorkflowTool[]> {
+    const tenant = tenantId || this.config.defaultTenant;
+    const cacheKey = `workflows:${tenant}`;
+
+    // If cache is still valid, use it
+    if (this.isCacheValid(cacheKey)) {
+      return this.cache.get(cacheKey) || [];
+    }
+
+    // If cache is expired but we refreshed recently (within 30 seconds),
+    // try a gentle refresh first
+    const lastRefresh = this.lastRefreshTime.get(cacheKey) || 0;
+    const timeSinceRefresh = Date.now() - lastRefresh;
+
+    if (timeSinceRefresh < 30000) { // 30 seconds
+      this.logger.debug(`Recent refresh detected, using gentle discovery for tenant: ${tenant}`);
+      return this.discoverWorkflows(tenantId);
+    }
+
+    // Otherwise, force a refresh
+    this.logger.debug(`Cache expired and no recent refresh, forcing refresh for tenant: ${tenant}`);
+    return this.forceRefreshWorkflows(tenantId);
   }
 }

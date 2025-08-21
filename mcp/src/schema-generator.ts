@@ -19,9 +19,8 @@ export class SchemaGenerator {
     this.logger.debug('Generating input schema from workflow definition');
 
     try {
-      // For now, return a simple default schema to avoid JSON schema validation issues
-      // TODO: Implement proper schema extraction once we have real workflow definitions
-      return this.getDefaultInputSchema();
+      // Extract input schema from SDL definition
+      return this.extractInputFromDefinition(workflowDefinition);
     } catch (error) {
       this.logger.warn('Failed to generate input schema, using default:', error);
       return this.getDefaultInputSchema();
@@ -62,22 +61,29 @@ export class SchemaGenerator {
   }
 
   private extractInputFromDefinition(definition: any): JsonSchema {
-    // Check for explicit input schema in SDL definition
+    this.logger.debug('Extracting input schema from SDL definition', { definition });
+
+    // Check for explicit input schema in SDL definition (top-level)
     if (definition.input) {
+      this.logger.debug('Found input schema at top level');
       return this.convertToJsonSchema(definition.input);
     }
 
-    // Check for input in document section
+    // Check for input in document section (SDL 1.0.0 format)
     if (definition.document?.input) {
+      this.logger.debug('Found input schema in document section');
       return this.convertToJsonSchema(definition.document.input);
     }
 
-    // Check for dataInputSchema in SDL 1.0.0 format
+    // Check for dataInputSchema in legacy format
     if (definition.dataInputSchema) {
+      this.logger.debug('Found dataInputSchema in legacy format');
       return definition.dataInputSchema;
     }
 
-    return this.getDefaultInputSchema();
+    // Try to infer input schema from task variable references
+    this.logger.debug('No explicit input schema found, inferring from tasks');
+    return this.inferInputFromTasks(definition);
   }
 
   private extractOutputFromDefinition(definition: any): JsonSchema | undefined {
@@ -135,19 +141,44 @@ export class SchemaGenerator {
   }
 
   private convertToJsonSchema(input: any): JsonSchema {
+    this.logger.debug('Converting to JSON Schema', { input });
+
     if (typeof input === 'object' && input.type) {
       // Already a JSON schema
+      this.logger.debug('Input is already in JSON Schema format');
       return input;
     }
 
-    // Convert simple object to JSON schema
+    // Convert SDL input schema format to JSON schema
     const properties: Record<string, any> = {};
     const required: string[] = [];
 
     for (const [key, value] of Object.entries(input)) {
       if (typeof value === 'object' && value !== null) {
-        properties[key] = value;
+        // Handle SDL format: { fieldName: { type: "string", description: "..." } }
+        const valueObj = value as any;
+        if (valueObj.type) {
+          properties[key] = {
+            type: valueObj.type,
+            description: valueObj.description || `${key} parameter`,
+            format: valueObj.format,
+            ...(valueObj.enum && { enum: valueObj.enum }),
+            ...(valueObj.minimum !== undefined && { minimum: valueObj.minimum }),
+            ...(valueObj.maximum !== undefined && { maximum: valueObj.maximum }),
+          };
+
+          // Remove undefined properties
+          Object.keys(properties[key]).forEach(prop => {
+            if (properties[key][prop] === undefined) {
+              delete properties[key][prop];
+            }
+          });
+        } else {
+          // Nested object
+          properties[key] = value;
+        }
       } else {
+        // Simple value, infer type
         properties[key] = {
           type: this.inferType(value),
           description: `Input parameter: ${key}`,
@@ -155,12 +186,15 @@ export class SchemaGenerator {
       }
     }
 
-    return {
-      type: 'object',
+    const schema = {
+      type: 'object' as const,
       properties,
       required,
       additionalProperties: true,
     };
+
+    this.logger.debug('Generated JSON Schema', { schema });
+    return schema;
   }
 
   private inferType(value: any): string {

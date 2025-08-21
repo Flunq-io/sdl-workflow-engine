@@ -729,6 +729,37 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 		}
 	}
 
+	// Prepare workflow context for the executor
+	workflowContext := map[string]interface{}{}
+
+	// Add workflow execution input to context
+	if state.Input != nil {
+		workflowContext["workflow_input"] = state.Input.AsMap()
+	}
+
+	// Add current workflow variables to context
+	if state.Variables != nil {
+		workflowContext["variables"] = state.Variables.AsMap()
+	}
+
+	// Add completed task outputs to context for reference
+	taskOutputs := make(map[string]interface{})
+	for _, completedTask := range state.CompletedTasks {
+		if completedTask.Data != nil && completedTask.Data.Output != nil {
+			taskOutputs[completedTask.Name] = completedTask.Data.Output.AsMap()
+		}
+	}
+	if len(taskOutputs) > 0 {
+		workflowContext["task_outputs"] = taskOutputs
+	}
+
+	p.logger.Debug("Prepared workflow context for task",
+		"task_name", task.Name,
+		"workflow_id", state.WorkflowId,
+		"has_workflow_input", state.Input != nil,
+		"has_variables", state.Variables != nil,
+		"completed_tasks_count", len(state.CompletedTasks))
+
 	// Create CloudEvent with JSON data (compatible with Executor Service)
 	event := &cloudevents.CloudEvent{
 		ID:          fmt.Sprintf("task-requested-%s", taskID),
@@ -748,7 +779,7 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			"workflow_id":  state.WorkflowId,
 			"execution_id": executionID,
 			"input":        inputData,
-			"context":      map[string]interface{}{}, // Could include workflow context
+			"context":      workflowContext, // Now includes workflow execution input and variables
 			"config": map[string]interface{}{
 				"timeout":    300, // 5 minutes
 				"retries":    3,
