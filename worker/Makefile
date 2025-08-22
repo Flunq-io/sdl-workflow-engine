@@ -1,6 +1,25 @@
 # Worker Service Makefile
 
-.PHONY: proto build test clean run
+# Variables
+BINARY_NAME=worker
+BINARY_PATH=bin/$(BINARY_NAME)
+MAIN_PATH=cmd/server/main.go
+DOCKER_IMAGE=flunq-worker
+DOCKER_TAG=latest
+
+# Go parameters
+GOCMD=go
+GOBUILD=$(GOCMD) build
+GOCLEAN=$(GOCMD) clean
+GOTEST=$(GOCMD) test
+GOGET=$(GOCMD) get
+GOMOD=$(GOCMD) mod
+
+# Build flags
+BUILD_FLAGS=-ldflags="-w -s"
+CGO_ENABLED=0
+
+.PHONY: proto build test clean run coverage dev docker-build docker-run help
 
 # Generate protobuf code
 proto:
@@ -13,69 +32,132 @@ proto:
 
 # Build the worker service
 build: proto
-	@echo "Building worker service..."
+	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p bin
-	@go build -o bin/worker cmd/server/main.go
+	CGO_ENABLED=$(CGO_ENABLED) $(GOBUILD) $(BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
+	@echo "Build complete: $(BINARY_PATH)"
 
 # Run tests
 test:
 	@echo "Running tests..."
-	@go test ./...
+	$(GOTEST) -v ./...
+
+# Run tests with coverage
+coverage:
+	@echo "Running tests with coverage..."
+	$(GOTEST) -v -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
 
 # Clean build artifacts
 clean:
-	@echo "Cleaning build artifacts..."
+	@echo "Cleaning..."
+	$(GOCLEAN)
 	@rm -rf bin/
 	@rm -rf proto/gen/
+	@rm -f coverage.out coverage.html
+	@echo "Clean complete"
 
 # Run the worker service
 run: build
-	@echo "Starting worker service..."
-	@./bin/worker
+	@echo "Starting $(BINARY_NAME)..."
+	./$(BINARY_PATH)
 
-# Install dependencies
+# Run in development mode
+dev:
+	@echo "Starting $(BINARY_NAME) in development mode..."
+	$(GOCMD) run $(MAIN_PATH)
+
+# Download dependencies
 deps:
-	@echo "Installing dependencies..."
-	@go mod tidy
-	@go mod download
+	@echo "Downloading dependencies..."
+	$(GOMOD) download
+	$(GOMOD) tidy
+
+# Update dependencies
+update-deps:
+	@echo "Updating dependencies..."
+	$(GOMOD) tidy
+	$(GOGET) -u ./...
+
+# Build Docker image
+docker-build:
+	@echo "Building Docker image..."
+	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+	@echo "Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)"
+
+# Run Docker container
+docker-run:
+	@echo "Running Docker container..."
+	docker run -d \
+		--name flunq-worker \
+		-p 8082:8082 \
+		-p 9090:9090 \
+		-e REDIS_URL=host.docker.internal:6379 \
+		$(DOCKER_IMAGE):$(DOCKER_TAG)
+
+# Stop Docker container
+docker-stop:
+	@echo "Stopping Docker container..."
+	docker stop flunq-worker || true
+	docker rm flunq-worker || true
+
+# Lint code
+lint:
+	@echo "Running linter..."
+	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
+	golangci-lint run
 
 # Format code
 fmt:
 	@echo "Formatting code..."
-	@go fmt ./...
+	$(GOCMD) fmt ./...
 
-# Lint code
-lint:
-	@echo "Linting code..."
-	@golangci-lint run
+# Vet code
+vet:
+	@echo "Vetting code..."
+	$(GOCMD) vet ./...
 
-# Generate mocks for testing
-mocks:
-	@echo "Generating mocks..."
-	@mockgen -source=internal/interfaces/interfaces.go -destination=internal/mocks/interfaces.go
+# Security check
+sec:
+	@echo "Running security check..."
+	@which gosec > /dev/null || (echo "gosec not installed. Install with: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest" && exit 1)
+	gosec ./...
 
-# Docker build
-docker-build:
-	@echo "Building Docker image..."
-	@docker build -t flunq-worker:latest .
+# Full check (format, vet, lint, test)
+check: fmt vet lint test
+	@echo "All checks passed!"
 
-# Docker run
-docker-run:
-	@echo "Running Docker container..."
-	@docker run --rm -p 8082:8082 flunq-worker:latest
+# Install the binary
+install: build
+	@echo "Installing $(BINARY_NAME)..."
+	@cp $(BINARY_PATH) /usr/local/bin/
+	@echo "$(BINARY_NAME) installed to /usr/local/bin/"
 
 # Help
 help:
 	@echo "Available targets:"
 	@echo "  proto        - Generate protobuf code"
-	@echo "  build        - Build the worker service"
-	@echo "  test         - Run tests"
+	@echo "  build        - Build the binary"
 	@echo "  clean        - Clean build artifacts"
-	@echo "  run          - Run the worker service"
-	@echo "  deps         - Install dependencies"
-	@echo "  fmt          - Format code"
-	@echo "  lint         - Lint code"
-	@echo "  mocks        - Generate mocks for testing"
+	@echo "  test         - Run tests"
+	@echo "  coverage     - Run tests with coverage"
+	@echo "  run          - Build and run the application"
+	@echo "  dev          - Run in development mode"
+	@echo "  deps         - Download dependencies"
+	@echo "  update-deps  - Update dependencies"
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run Docker container"
+	@echo "  docker-stop  - Stop Docker container"
+	@echo "  lint         - Run linter"
+	@echo "  fmt          - Format code"
+	@echo "  vet          - Vet code"
+	@echo "  sec          - Run security check"
+	@echo "  check        - Run all checks"
+	@echo "  install      - Install binary to /usr/local/bin"
 	@echo "  help         - Show this help"
+
+# Generate mocks for testing
+mocks:
+	@echo "Generating mocks..."
+	@mockgen -source=internal/interfaces/interfaces.go -destination=internal/mocks/interfaces.go

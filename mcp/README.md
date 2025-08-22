@@ -28,9 +28,10 @@ AI Model → MCP Client → MCP Server → flunq.io API → Workflow Engine
 ### **Workflow Discovery**
 - **Dynamic Tool Discovery**: Automatically discovers all workflows by tenant
 - **ID-based Tool Naming**: Uses workflow IDs for reliable tool identification
-- **Schema Generation**: Generates JSON schemas from workflow definitions
+- **SDL 1.0.0 Schema Support**: Full support for Serverless Workflow specification input schemas
+- **Schema Generation**: Generates JSON schemas from workflow definitions (including nested formats)
 - **Metadata Extraction**: Extracts workflow descriptions, parameters, and expected outputs
-- **Cache Management**: 30-second cache TTL for fast development iteration
+- **Cache Management**: Configurable cache TTL for fast development iteration
 
 ### **Workflow Execution**
 - **Tool Execution**: Executes workflows as MCP tools using workflow IDs
@@ -72,6 +73,64 @@ Each workflow is exposed as an MCP tool using the workflow ID for reliable ident
   }
 }
 ```
+
+## 🔧 **SDL Input Schema Support**
+
+The MCP server provides comprehensive support for Serverless Workflow specification input schemas:
+
+### **Supported Formats**
+
+#### **Nested JSON Schema Format (SDL 1.0.0)**
+```json
+"input": {
+  "format": "json",
+  "document": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "searchTerm": {
+        "type": "string",
+        "description": "The search term to search for"
+      }
+    },
+    "required": ["searchTerm"]
+  }
+}
+```
+
+#### **Direct JSON Schema Format**
+```json
+"input": {
+  "type": "object",
+  "properties": {
+    "searchTerm": {
+      "type": "string",
+      "description": "The search term to search for"
+    }
+  },
+  "required": ["searchTerm"]
+}
+```
+
+#### **Legacy SDL Format**
+```json
+"dataInputSchema": {
+  "type": "object",
+  "properties": {
+    "searchTerm": {
+      "type": "string",
+      "description": "The search term to search for"
+    }
+  }
+}
+```
+
+### **Automatic Schema Detection**
+The MCP server automatically detects and extracts the correct schema format:
+1. **Nested Format Detection**: Recognizes `{ format: "json", document: { ... } }` structure
+2. **Direct Schema Support**: Handles direct JSON Schema objects
+3. **Legacy Compatibility**: Supports older `dataInputSchema` format
+4. **Fallback Inference**: Infers schema from task variable references when no explicit schema exists
 
 ### **Special Tools**
 

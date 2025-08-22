@@ -1,5 +1,7 @@
 # Worker Service
 
+## ✅ **Status: Production Ready & Tested**
+
 The Worker service executes Serverless Workflow DSL using the official Serverless Workflow Go SDK and implements the core event processing pattern for workflow orchestration with enterprise-grade resilience through the unified EventStore interface.
 
 ## 🚀 Features
@@ -198,34 +200,65 @@ if task.TaskType == "wait" {
 }
 ```
 
-## 🔧 Configuration
+## 📊 **Configuration**
 
-Environment variables:
-- `WORKER_CONCURRENCY`: Number of concurrent event processors (default: 4)
-- `WORKER_CONSUMER_GROUP`: Consumer group name (default: "worker-service")
-- `WORKER_STREAM_BATCH`: Batch size for event consumption (default: 10)
-- `WORKER_STREAM_BLOCK`: Block timeout for event consumption (default: 1s)
-- `WORKER_RECLAIM_ENABLED`: Enable orphaned message reclaim (default: false)
-- `REDIS_URL`: Redis connection string
-- `EVENTSTORE_TYPE`: EventStore backend type (redis, kafka, rabbitmq)
-- `DB_TYPE`: Database backend type (redis, postgres, mongo)
-- `LOG_LEVEL`: Logging level
+Configuration is managed through environment variables. Copy `.env.example` to `.env` and customize:
 
-## 🚀 Quick Start
+### **Configuration Options**
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_URL` | `localhost:6379` | Redis connection URL |
+| `REDIS_HOST` | `localhost` | Redis host |
+| `REDIS_PASSWORD` | `` | Redis password (if required) |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| `METRICS_PORT` | `9090` | Prometheus metrics port |
+| `HEALTH_PORT` | `8082` | Health check endpoint port |
+| `WORKER_CONCURRENCY` | `4` | Number of concurrent event processors |
+| `WORKER_CONSUMER_GROUP` | `worker-service` | Consumer group name |
+| `WORKER_STREAM_BATCH` | `10` | Batch size for event consumption |
+| `WORKER_STREAM_BLOCK` | `1s` | Block timeout for event consumption |
+| `WORKER_RECLAIM_ENABLED` | `false` | Enable orphaned message reclaim |
+| `EVENTSTORE_TYPE` | `redis` | EventStore backend type |
+| `DB_TYPE` | `redis` | Database backend type |
+| `TIMER_SERVICE_ENABLED` | `true` | Enable timer service |
+| `TIMER_SERVICE_PRECISION` | `1s` | Timer service precision |
+| `WORKFLOW_ENGINE_TYPE` | `serverless` | Workflow engine type |
+| `WORKFLOW_TIMEOUT_SECONDS` | `3600` | Workflow execution timeout |
+| `WORKFLOW_MAX_RETRIES` | `3` | Workflow maximum retries |
+| `EVENT_BATCH_SIZE` | `10` | Event processing batch size |
+| `EVENT_PROCESSING_TIMEOUT` | `30s` | Event processing timeout |
+| `EVENT_RETRY_ATTEMPTS` | `3` | Event processing retry attempts |
+| `EVENT_RETRY_DELAY_MS` | `200` | Event retry delay in milliseconds |
+
+## 🚀 **Quick Start**
+
+### Prerequisites
+- Redis running on `localhost:6379`
+- Go 1.21 or later
+
+### Setup and Run
 ```bash
-# Install dependencies
-go mod tidy
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
 
-# Build the service
-go build -o bin/worker cmd/server/main.go
+# Build and run
+make build
+make run
 
-# Run the service (requires Redis)
-./bin/worker
-go run cmd/server/main.go
+# Or run in development mode
+make dev
 
 # Run tests
-go test ./internal/processor -v
+make test
+
+# Run with coverage
+make coverage
+
+# Build Docker image
+make docker-build
+make docker-run
 
 # Test all components
 go test ./... -v

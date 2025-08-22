@@ -94,6 +94,9 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		zap.String("task_id", task.TaskID),
 		zap.Any("evaluated_parameters", evaluatedConfig.Parameters))
 
+	// Build resolved input data for storage in TaskResult
+	resolvedInput := e.buildResolvedInput(task, evaluatedConfig)
+
 	// Execute OpenAPI operation
 	response, err := e.openAPIClient.ExecuteOperation(ctx, evaluatedConfig)
 
@@ -170,7 +173,7 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     success,
-		Input:       task.Input,
+		Input:       resolvedInput, // Use resolved input instead of original
 		Output:      finalOutput,
 		Duration:    duration,
 		StartedAt:   startTime,
@@ -280,6 +283,9 @@ func (e *CallTaskExecutor) executeHTTPCall(ctx context.Context, task *TaskReques
 		zap.Bool("success", success),
 		zap.Duration("duration", duration))
 
+	// Build resolved input for HTTP calls
+	resolvedInput := e.buildResolvedInputForHTTP(task, config)
+
 	return &TaskResult{
 		TaskID:      task.TaskID,
 		TaskName:    task.TaskName,
@@ -287,7 +293,7 @@ func (e *CallTaskExecutor) executeHTTPCall(ctx context.Context, task *TaskReques
 		WorkflowID:  task.WorkflowID,
 		ExecutionID: task.ExecutionID,
 		Success:     success,
-		Input:       task.Input,
+		Input:       resolvedInput, // Use resolved input instead of original
 		Output:      output,
 		Duration:    duration,
 		StartedAt:   startTime,
@@ -712,4 +718,85 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// buildResolvedInput builds the resolved input data for storage in TaskResult
+func (e *CallTaskExecutor) buildResolvedInput(task *TaskRequest, evaluatedConfig *CallConfig) map[string]interface{} {
+	resolvedInput := make(map[string]interface{})
+
+	// Copy original task input as base
+	if task.Input != nil {
+		for key, value := range task.Input {
+			resolvedInput[key] = value
+		}
+	}
+
+	// Add resolved call configuration
+	resolvedInput["call_type"] = evaluatedConfig.CallType
+
+	if evaluatedConfig.CallType == "openapi" {
+		resolvedInput["document"] = map[string]interface{}{
+			"endpoint": evaluatedConfig.Document.Endpoint,
+		}
+		resolvedInput["operation_id"] = evaluatedConfig.OperationID
+
+		// Store resolved parameters (this is the key fix)
+		if evaluatedConfig.Parameters != nil {
+			resolvedInput["parameters"] = evaluatedConfig.Parameters
+		}
+	} else if evaluatedConfig.CallType == "http" {
+		resolvedInput["method"] = evaluatedConfig.Method
+		resolvedInput["url"] = evaluatedConfig.URL
+
+		// Store resolved parameters
+		if evaluatedConfig.Parameters != nil {
+			resolvedInput["parameters"] = evaluatedConfig.Parameters
+		}
+
+		// Store resolved headers
+		if evaluatedConfig.Headers != nil {
+			resolvedInput["headers"] = evaluatedConfig.Headers
+		}
+
+		// Store resolved body
+		if evaluatedConfig.Body != nil {
+			resolvedInput["body"] = evaluatedConfig.Body
+		}
+	}
+
+	return resolvedInput
+}
+
+// buildResolvedInputForHTTP builds the resolved input data for HTTP calls
+func (e *CallTaskExecutor) buildResolvedInputForHTTP(task *TaskRequest, config *CallConfig) map[string]interface{} {
+	resolvedInput := make(map[string]interface{})
+
+	// Copy original task input as base
+	if task.Input != nil {
+		for key, value := range task.Input {
+			resolvedInput[key] = value
+		}
+	}
+
+	// Add resolved HTTP configuration
+	resolvedInput["call_type"] = "http"
+	resolvedInput["method"] = config.Method
+	resolvedInput["url"] = config.URL
+
+	// Store resolved parameters
+	if config.Parameters != nil {
+		resolvedInput["parameters"] = config.Parameters
+	}
+
+	// Store resolved headers
+	if config.Headers != nil {
+		resolvedInput["headers"] = config.Headers
+	}
+
+	// Store resolved body
+	if config.Body != nil {
+		resolvedInput["body"] = config.Body
+	}
+
+	return resolvedInput
 }

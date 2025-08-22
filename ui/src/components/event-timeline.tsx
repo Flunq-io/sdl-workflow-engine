@@ -234,6 +234,23 @@ function extractInputData(event: WorkflowEvent): Record<string, JsonValue> | nul
     if (event.data.input) return event.data.input as Record<string, JsonValue>
   }
 
+  // For task.completed events - get the resolved input data
+  if (event.type.includes('task.completed')) {
+    // The completed event has resolved input data nested under data.data.input
+    const nestedData = (event.data as Record<string, unknown>)['data'] as Record<string, unknown> | undefined
+    if (nestedData && nestedData.input) {
+      return nestedData.input as Record<string, JsonValue>
+    }
+
+    // Fallback to direct input field
+    if (Object.prototype.hasOwnProperty.call(event.data as Record<string, unknown>, 'input_data')) {
+      return (event.data as Record<string, JsonValue>)['input_data'] as Record<string, JsonValue>
+    }
+    if (event.data.input) {
+      return event.data.input as Record<string, JsonValue>
+    }
+  }
+
   return null
 }
 
@@ -621,15 +638,18 @@ export function EventTimeline({ events, isLoading, error, locale = 'en' }: Event
 
                           {/* Task Input/Output Data */}
                           {(() => {
+                            // Prefer resolved input from completed event, fallback to requested event
+                            const completedInputData = completedEvent ? extractInputData(completedEvent) : null
                             const requestedInputData = extractInputData(requestedEvent)
+                            const inputData = completedInputData || requestedInputData
                             const completedOutputData = completedEvent ? extractOutputData(completedEvent) : null
 
                             return (
                               <>
-                                {requestedInputData && (
+                                {inputData && (
                                   <DataDisplay
                                     title={t('eventTimeline.taskInput')}
-                                    data={requestedInputData}
+                                    data={inputData}
                                     variant="input"
                                   />
                                 )}

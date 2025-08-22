@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -229,21 +230,89 @@ func main() {
 
 // Config holds the configuration for the Worker service
 type Config struct {
+	// Redis Configuration
 	RedisURL      string
+	RedisHost     string
 	RedisPassword string
-	LogLevel      string
-	MetricsPort   string
-	HealthPort    string
+
+	// Logging Configuration
+	LogLevel string
+
+	// Service Ports
+	MetricsPort string
+	HealthPort  string
+
+	// Worker Configuration
+	WorkerConcurrency    int
+	WorkerConsumerGroup  string
+	WorkerStreamBatch    int
+	WorkerStreamBlock    string
+	WorkerReclaimEnabled bool
+
+	// EventStore Configuration
+	EventStoreType string
+
+	// Database Configuration
+	DBType string
+
+	// Timer Service Configuration
+	TimerServiceEnabled   bool
+	TimerServicePrecision string
+
+	// Workflow Engine Configuration
+	WorkflowEngineType     string
+	WorkflowTimeoutSeconds int
+	WorkflowMaxRetries     int
+
+	// Event Processing Configuration
+	EventBatchSize         int
+	EventProcessingTimeout string
+	EventRetryAttempts     int
+	EventRetryDelayMs      int
 }
 
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
 	return &Config{
+		// Redis Configuration
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
+		RedisHost:     getEnv("REDIS_HOST", "localhost"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		LogLevel:      getEnv("LOG_LEVEL", "warn"),
-		MetricsPort:   getEnv("METRICS_PORT", "9090"),
-		HealthPort:    getEnv("HEALTH_PORT", "8082"),
+
+		// Logging Configuration
+		LogLevel: getEnv("LOG_LEVEL", "info"),
+
+		// Service Ports
+		MetricsPort: getEnv("METRICS_PORT", "9090"),
+		HealthPort:  getEnv("HEALTH_PORT", "8082"),
+
+		// Worker Configuration
+		WorkerConcurrency:    getEnvInt("WORKER_CONCURRENCY", 4),
+		WorkerConsumerGroup:  getEnv("WORKER_CONSUMER_GROUP", "worker-service"),
+		WorkerStreamBatch:    getEnvInt("WORKER_STREAM_BATCH", 10),
+		WorkerStreamBlock:    getEnv("WORKER_STREAM_BLOCK", "1s"),
+		WorkerReclaimEnabled: getEnvBool("WORKER_RECLAIM_ENABLED", false),
+
+		// EventStore Configuration
+		EventStoreType: getEnv("EVENTSTORE_TYPE", "redis"),
+
+		// Database Configuration
+		DBType: getEnv("DB_TYPE", "redis"),
+
+		// Timer Service Configuration
+		TimerServiceEnabled:   getEnvBool("TIMER_SERVICE_ENABLED", true),
+		TimerServicePrecision: getEnv("TIMER_SERVICE_PRECISION", "1s"),
+
+		// Workflow Engine Configuration
+		WorkflowEngineType:     getEnv("WORKFLOW_ENGINE_TYPE", "serverless"),
+		WorkflowTimeoutSeconds: getEnvInt("WORKFLOW_TIMEOUT_SECONDS", 3600),
+		WorkflowMaxRetries:     getEnvInt("WORKFLOW_MAX_RETRIES", 3),
+
+		// Event Processing Configuration
+		EventBatchSize:         getEnvInt("EVENT_BATCH_SIZE", 10),
+		EventProcessingTimeout: getEnv("EVENT_PROCESSING_TIMEOUT", "30s"),
+		EventRetryAttempts:     getEnvInt("EVENT_RETRY_ATTEMPTS", 3),
+		EventRetryDelayMs:      getEnvInt("EVENT_RETRY_DELAY_MS", 200),
 	}
 }
 
@@ -251,6 +320,26 @@ func loadConfig() *Config {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+// getEnvInt gets an environment variable as integer with a default value
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+// getEnvBool gets an environment variable as boolean with a default value
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
 	}
 	return defaultValue
 }

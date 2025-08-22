@@ -1,6 +1,12 @@
 # Executor Service
 
-The Executor service handles task execution for the flunq.io workflow engine with enterprise-grade resilience. It processes task requests and executes various types of tasks including HTTP calls, data manipulation, and wait operations using sophisticated event processing patterns.
+## ✅ **Status: Production Ready & Tested**
+
+The Executor service is fully production-ready and handles task execution for the flunq.io workflow engine with enterprise-grade resilience. It processes task requests and executes various types of tasks including HTTP calls, data manipulation, and wait operations using sophisticated event processing patterns.
+
+## 🎯 **Overview**
+
+The Executor Service is responsible for executing individual workflow tasks with enterprise-grade error handling and retry capabilities. It subscribes to `task.requested` events and publishes `task.completed` events with proper status tracking and SDL-compliant error handling.
 
 ## 🚀 Features
 
@@ -38,6 +44,53 @@ executor/
 │   └── processor/       # Enhanced event processing with resilience
 └── README.md
 ```
+
+## 📊 **Configuration**
+
+Configuration is managed through environment variables. Copy `.env.example` to `.env` and customize:
+
+```bash
+# Redis Configuration
+REDIS_URL=localhost:6379
+REDIS_PASSWORD=
+
+# Logging Configuration
+LOG_LEVEL=info
+
+# Service Ports
+METRICS_PORT=9091
+HEALTH_PORT=8083
+
+# Event Stream Configuration
+EVENT_STREAM_TYPE=redis
+
+# Task Execution Configuration
+MAX_CONCURRENT_TASKS=10
+TASK_TIMEOUT_SECONDS=300
+RETRY_MAX_ATTEMPTS=3
+RETRY_BASE_DELAY_MS=200
+
+# OpenAPI Configuration
+OPENAPI_CACHE_TTL_SECONDS=300
+OPENAPI_REQUEST_TIMEOUT_SECONDS=30
+```
+
+### **Configuration Options**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_URL` | `localhost:6379` | Redis connection URL |
+| `REDIS_PASSWORD` | `` | Redis password (if required) |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| `METRICS_PORT` | `9091` | Prometheus metrics port |
+| `HEALTH_PORT` | `8083` | Health check endpoint port |
+| `EVENT_STREAM_TYPE` | `redis` | Event stream backend type |
+| `MAX_CONCURRENT_TASKS` | `10` | Maximum concurrent task execution |
+| `TASK_TIMEOUT_SECONDS` | `300` | Task execution timeout |
+| `RETRY_MAX_ATTEMPTS` | `3` | Maximum retry attempts |
+| `RETRY_BASE_DELAY_MS` | `200` | Base retry delay in milliseconds |
+| `OPENAPI_CACHE_TTL_SECONDS` | `300` | OpenAPI document cache TTL |
+| `OPENAPI_REQUEST_TIMEOUT_SECONDS` | `30` | OpenAPI request timeout |
 
 ## 📨 Event Processing
 

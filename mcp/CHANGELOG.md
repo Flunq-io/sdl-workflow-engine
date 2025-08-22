@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.1] - 2025-08-22
+
+### 🔧 SDL Input Schema Improvements
+
+#### **Enhanced Schema Support**
+- ✅ **Nested SDL Format Support**: Full support for `{ format: "json", document: { ... } }` input schemas
+- ✅ **Automatic Schema Detection**: Intelligent detection and extraction of JSON schemas from various formats
+- ✅ **Legacy Compatibility**: Maintains backward compatibility with older schema formats
+- ✅ **Improved Documentation**: Comprehensive documentation of supported schema formats
+
+#### **Bug Fixes**
+- ✅ **Fixed Input Schema Extraction**: Resolved issue where nested SDL input schemas weren't properly extracted
+- ✅ **Improved Error Handling**: Better error messages for schema validation failures
+
+#### **Documentation Updates**
+- ✅ **SDL Schema Examples**: Added comprehensive examples of supported input schema formats
+- ✅ **Configuration Guide**: Updated configuration documentation with latest options
+
 ## [0.1.0] - 2025-08-21
 
 ### 🎉 Initial Release - Clean & Production Ready

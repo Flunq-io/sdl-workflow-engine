@@ -66,12 +66,26 @@ export class SchemaGenerator {
     // Check for explicit input schema in SDL definition (top-level)
     if (definition.input) {
       this.logger.debug('Found input schema at top level');
+
+      // Handle nested format: { format: "json", document: { ... } }
+      if (definition.input.document && definition.input.format === 'json') {
+        this.logger.debug('Found nested JSON schema format');
+        return definition.input.document;
+      }
+
       return this.convertToJsonSchema(definition.input);
     }
 
     // Check for input in document section (SDL 1.0.0 format)
     if (definition.document?.input) {
       this.logger.debug('Found input schema in document section');
+
+      // Handle nested format in document section
+      if (definition.document.input.document && definition.document.input.format === 'json') {
+        this.logger.debug('Found nested JSON schema format in document section');
+        return definition.document.input.document;
+      }
+
       return this.convertToJsonSchema(definition.document.input);
     }
 
@@ -147,6 +161,12 @@ export class SchemaGenerator {
       // Already a JSON schema
       this.logger.debug('Input is already in JSON Schema format');
       return input;
+    }
+
+    // Check if this is a nested format with document and format
+    if (input.format === 'json' && input.document) {
+      this.logger.debug('Found nested format with document, extracting JSON Schema');
+      return input.document;
     }
 
     // Convert SDL input schema format to JSON schema

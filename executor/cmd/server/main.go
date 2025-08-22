@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -139,27 +140,72 @@ func main() {
 
 // Config holds the configuration for the Executor Service
 type Config struct {
+	// Redis Configuration
 	RedisURL      string
 	RedisPassword string
-	LogLevel      string
-	MetricsPort   string
-	HealthPort    string
+
+	// Logging Configuration
+	LogLevel string
+
+	// Service Ports
+	MetricsPort string
+	HealthPort  string
+
+	// Event Stream Configuration
+	EventStreamType string
+
+	// Task Execution Configuration
+	MaxConcurrentTasks int
+	TaskTimeoutSeconds int
+	RetryMaxAttempts   int
+	RetryBaseDelayMs   int
+
+	// OpenAPI Configuration
+	OpenAPICacheTTLSeconds       int
+	OpenAPIRequestTimeoutSeconds int
 }
 
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
 	return &Config{
+		// Redis Configuration
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		LogLevel:      getEnv("LOG_LEVEL", "warn"),
-		MetricsPort:   getEnv("METRICS_PORT", "9091"),
-		HealthPort:    getEnv("HEALTH_PORT", "8083"),
+
+		// Logging Configuration
+		LogLevel: getEnv("LOG_LEVEL", "info"),
+
+		// Service Ports
+		MetricsPort: getEnv("METRICS_PORT", "9091"),
+		HealthPort:  getEnv("HEALTH_PORT", "8083"),
+
+		// Event Stream Configuration
+		EventStreamType: getEnv("EVENT_STREAM_TYPE", "redis"),
+
+		// Task Execution Configuration
+		MaxConcurrentTasks: getEnvInt("MAX_CONCURRENT_TASKS", 10),
+		TaskTimeoutSeconds: getEnvInt("TASK_TIMEOUT_SECONDS", 300),
+		RetryMaxAttempts:   getEnvInt("RETRY_MAX_ATTEMPTS", 3),
+		RetryBaseDelayMs:   getEnvInt("RETRY_BASE_DELAY_MS", 200),
+
+		// OpenAPI Configuration
+		OpenAPICacheTTLSeconds:       getEnvInt("OPENAPI_CACHE_TTL_SECONDS", 300),
+		OpenAPIRequestTimeoutSeconds: getEnvInt("OPENAPI_REQUEST_TIMEOUT_SECONDS", 30),
 	}
 }
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
 	}
 	return defaultValue
 }

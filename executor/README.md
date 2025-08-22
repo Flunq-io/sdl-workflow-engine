@@ -1,6 +1,8 @@
 # Executor Service
 
-The Executor Service is responsible for executing individual workflow tasks with enterprise-grade error handling and retry capabilities. It subscribes to `task.requested` events and publishes `task.completed` events with proper status tracking.
+## ✅ **Status: Production Ready & Tested**
+
+The Executor Service is responsible for executing individual workflow tasks with enterprise-grade error handling and retry capabilities. It subscribes to `task.requested` events and publishes `task.completed` events with proper status tracking and SDL-compliant error handling.
 
 ## Architecture
 
@@ -246,22 +248,59 @@ When a task fails after exhausting all retry attempts:
 3. Error information is stored in workflow variables
 4. No further tasks are processed
 
-## Running the Service
+## 📊 **Configuration**
+
+Configuration is managed through environment variables. Copy `.env.example` to `.env` and customize:
+
+### **Configuration Options**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_URL` | `localhost:6379` | Redis connection URL |
+| `REDIS_PASSWORD` | `` | Redis password (if required) |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| `METRICS_PORT` | `9091` | Prometheus metrics port |
+| `HEALTH_PORT` | `8083` | Health check endpoint port |
+| `EVENT_STREAM_TYPE` | `redis` | Event stream backend type |
+| `MAX_CONCURRENT_TASKS` | `10` | Maximum concurrent task execution |
+| `TASK_TIMEOUT_SECONDS` | `300` | Task execution timeout |
+| `RETRY_MAX_ATTEMPTS` | `3` | Maximum retry attempts |
+| `RETRY_BASE_DELAY_MS` | `200` | Base retry delay in milliseconds |
+| `OPENAPI_CACHE_TTL_SECONDS` | `300` | OpenAPI document cache TTL |
+| `OPENAPI_REQUEST_TIMEOUT_SECONDS` | `30` | OpenAPI request timeout |
+
+## 🚀 **Running the Service**
 
 ### Prerequisites
 - Redis running on `localhost:6379`
+- Go 1.21 or later
 
-### Start the Service
+### Quick Start with Makefile
+```bash
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Build and run
+make build
+make run
+
+# Or run in development mode
+make dev
+
+# Run tests
+make test
+
+# Build Docker image
+make docker-build
+make docker-run
+```
+
+### Manual Start
 ```bash
 cd executor
 go run cmd/server/main.go
 ```
-
-### Environment Variables
-- `EVENT_STREAM_TYPE`: Event backend (default: `redis`)
-- `REDIS_URL`: Redis URL (default: `localhost:6379`)
-- `REDIS_PASSWORD`: Redis password (default: empty)
-- `LOG_LEVEL`: Log level (default: `info`)
 
 ## Adding New Task Types
 
