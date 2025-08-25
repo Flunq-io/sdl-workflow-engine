@@ -124,15 +124,23 @@ type CallConfig struct {
 func ParseCallConfig(parameters map[string]interface{}) (*CallConfig, error) {
 	config := &CallConfig{}
 
+	// Debug logging to see what we're parsing
+	fmt.Printf("🔍 ParseCallConfig DEBUG - Input parameters: %+v\n", parameters)
+
 	// Convert map to JSON and back to struct for easy parsing
 	jsonData, err := json.Marshal(parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal parameters: %w", err)
 	}
 
+	fmt.Printf("🔍 ParseCallConfig DEBUG - JSON data: %s\n", string(jsonData))
+
 	if err := json.Unmarshal(jsonData, config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal call config: %w", err)
 	}
+
+	fmt.Printf("🔍 ParseCallConfig DEBUG - Parsed config: CallType=%s, Document=%+v, OperationID=%s\n",
+		config.CallType, config.Document, config.OperationID)
 
 	// Set defaults
 	if config.CallType == "" {

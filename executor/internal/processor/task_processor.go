@@ -49,7 +49,7 @@ func NewTaskProcessor(
 	}
 
 	// Create executor registry with all SDL-compliant executors
-	executorRegistry := executor.NewExecutorRegistry(logger)
+	executorRegistry := executor.NewExecutorRegistry(logger, eventStream)
 
 	return &TaskProcessor{
 		eventStream:      eventStream,
@@ -181,12 +181,20 @@ func (p *TaskProcessor) eventProcessingLoop(ctx context.Context) {
 						zap.String("event_id", ev.ID),
 						zap.String("event_type", ev.Type),
 						zap.String("task_id", ev.TaskID),
+						zap.String("tenant_id", ev.TenantID),
 						zap.Error(err))
 
 					// Send to DLQ for failed tasks
 					dlqEvent := ev.Clone()
 					dlqEvent.Type = "io.flunq.task.dlq"
+					dlqEvent.TenantID = ev.TenantID // Explicitly preserve tenant ID
 					dlqEvent.AddExtension("reason", fmt.Sprintf("task_execution_failed:%v", err))
+
+					p.logger.Info("Publishing DLQ event",
+						zap.String("event_id", dlqEvent.ID),
+						zap.String("tenant_id", dlqEvent.TenantID),
+						zap.String("original_tenant_id", ev.TenantID))
+
 					_ = p.eventStream.Publish(ctx, dlqEvent)
 
 					// Acknowledge the original message to prevent reprocessing
@@ -221,11 +229,20 @@ func (p *TaskProcessor) processTaskEvent(ctx context.Context, event *cloudevents
 		return fmt.Errorf("failed to parse task request: %w", err)
 	}
 
+	p.logger.Info("🔍 TASK ROUTING DEBUG",
+		zap.String("task_name", taskRequest.TaskName),
+		zap.String("task_type", taskRequest.TaskType),
+		zap.String("task_id", taskRequest.TaskID))
+
 	// Find appropriate task executor from registry
 	taskExecutor, exists := p.executorRegistry.GetExecutor(taskRequest.TaskType)
 	if !exists {
 		return fmt.Errorf("no executor found for task type: %s", taskRequest.TaskType)
 	}
+
+	p.logger.Info("🔍 EXECUTOR SELECTED",
+		zap.String("task_type", taskRequest.TaskType),
+		zap.String("executor_type", taskExecutor.GetTaskType()))
 
 	// Execute the task (error handling and retries are now handled by individual executors)
 	result, err := taskExecutor.Execute(ctx, taskRequest)

@@ -107,11 +107,20 @@ func (h *DefaultErrorHandler) ShouldRetry(ctx context.Context, err error, policy
 
 	// Check retry limits
 	if h.exceedsRetryLimits(policy, errorCtx) {
-		h.logger.Debug("Retry limits exceeded",
+		h.logger.Info("🚨 RETRY LIMITS EXCEEDED - STOPPING RETRIES",
 			zap.Int("attemptCount", errorCtx.AttemptCount),
 			zap.Duration("totalDuration", errorCtx.TotalDuration))
 		return false, 0, nil
 	}
+
+	h.logger.Info("🔄 RETRY ALLOWED - CONTINUING",
+		zap.Int("attemptCount", errorCtx.AttemptCount),
+		zap.Int("maxAttempts", func() int {
+			if policy.Limit != nil && policy.Limit.Attempt != nil {
+				return policy.Limit.Attempt.Count
+			}
+			return -1
+		}()))
 
 	// Calculate retry delay
 	delay := h.calculateRetryDelay(policy, errorCtx)
@@ -140,6 +149,15 @@ func (h *DefaultErrorHandler) MatchesFilter(err error, filter *ErrorFilter) bool
 
 // toWorkflowError converts any error to a WorkflowError
 func (h *DefaultErrorHandler) toWorkflowError(err error) *WorkflowError {
+	if err == nil {
+		return &WorkflowError{
+			Type:   "https://serverlessworkflow.io/spec/1.0.0/errors/runtime",
+			Status: 500,
+			Title:  "Unknown Error",
+			Detail: "nil error received",
+		}
+	}
+
 	if workflowErr, ok := err.(*WorkflowError); ok {
 		return workflowErr
 	}
@@ -231,7 +249,7 @@ func (h *DefaultErrorHandler) matchesProperty(workflowErr *WorkflowError, key st
 	return h.matchesValue(actualValue, expectedValue)
 }
 
-// matchesValue checks if an actual value matches an expected value (supports regex)
+// matchesValue checks if an actual value matches an expected value (supports regex and arrays)
 func (h *DefaultErrorHandler) matchesValue(actual, expected interface{}) bool {
 	if actual == nil && expected == nil {
 		return true
@@ -243,6 +261,17 @@ func (h *DefaultErrorHandler) matchesValue(actual, expected interface{}) bool {
 	// Direct equality check
 	if reflect.DeepEqual(actual, expected) {
 		return true
+	}
+
+	// Check if expected is an array/slice and actual is contained within it
+	expectedValue := reflect.ValueOf(expected)
+	if expectedValue.Kind() == reflect.Slice || expectedValue.Kind() == reflect.Array {
+		for i := 0; i < expectedValue.Len(); i++ {
+			if reflect.DeepEqual(actual, expectedValue.Index(i).Interface()) {
+				return true
+			}
+		}
+		return false
 	}
 
 	// String regex matching

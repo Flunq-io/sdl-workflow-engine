@@ -1,20 +1,23 @@
 package executor
 
 import (
+	sharedinterfaces "github.com/flunq-io/shared/pkg/interfaces"
 	"go.uber.org/zap"
 )
 
 // ExecutorRegistry manages all task executors
 type ExecutorRegistry struct {
-	executors map[string]TaskExecutor
-	logger    *zap.Logger
+	executors   map[string]TaskExecutor
+	logger      *zap.Logger
+	eventStream sharedinterfaces.EventStream
 }
 
 // NewExecutorRegistry creates a new executor registry with all SDL-compliant executors
-func NewExecutorRegistry(logger *zap.Logger) *ExecutorRegistry {
+func NewExecutorRegistry(logger *zap.Logger, eventStream sharedinterfaces.EventStream) *ExecutorRegistry {
 	registry := &ExecutorRegistry{
-		executors: make(map[string]TaskExecutor),
-		logger:    logger,
+		executors:   make(map[string]TaskExecutor),
+		logger:      logger,
+		eventStream: eventStream,
 	}
 
 	// Register all task executors
@@ -45,12 +48,9 @@ func (r *ExecutorRegistry) registerExecutors() {
 	executorMap["wait"] = waitExecutor
 	executorMap["inject"] = injectExecutor
 
-	// Register try task executor with access to other executors
-	tryExecutor := NewTryTaskExecutor(r.logger, executorMap)
+	// Register try task executor for SDL try/catch handling
+	tryExecutor := NewTryTaskExecutor(r.logger, executorMap, r.eventStream)
 	r.executors["try"] = tryExecutor
-
-	// Add try executor to the map so it can be nested
-	executorMap["try"] = tryExecutor
 
 	r.logger.Info("Registered task executors",
 		zap.Int("count", len(r.executors)),
@@ -59,7 +59,19 @@ func (r *ExecutorRegistry) registerExecutors() {
 
 // GetExecutor returns the executor for the specified task type
 func (r *ExecutorRegistry) GetExecutor(taskType string) (TaskExecutor, bool) {
+	r.logger.Info("🔍 EXECUTOR REGISTRY DEBUG",
+		zap.String("requested_task_type", taskType),
+		zap.Strings("available_types", r.getRegisteredTypes()))
+
 	executor, exists := r.executors[taskType]
+	if !exists {
+		r.logger.Error("❌ NO EXECUTOR FOUND",
+			zap.String("requested_task_type", taskType))
+	} else {
+		r.logger.Info("✅ EXECUTOR FOUND",
+			zap.String("requested_task_type", taskType),
+			zap.String("executor_type", executor.GetTaskType()))
+	}
 	return executor, exists
 }
 

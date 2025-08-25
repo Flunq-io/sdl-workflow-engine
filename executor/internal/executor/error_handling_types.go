@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// TryTaskConfig represents the configuration for a try task
+// TryTaskConfig represents the configuration for a try task (SDL format)
 type TryTaskConfig struct {
-	Try   map[string]*TaskRequest `json:"try" yaml:"try"`
-	Catch *CatchConfig            `json:"catch" yaml:"catch"`
+	Try   interface{} `json:"try" yaml:"try"`     // SDL try block (raw format)
+	Catch interface{} `json:"catch" yaml:"catch"` // SDL catch block (raw format)
 }
 
 // CatchConfig defines how to catch and handle errors

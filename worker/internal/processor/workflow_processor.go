@@ -721,9 +721,24 @@ func (p *WorkflowProcessor) publishTaskRequestedEvent(ctx context.Context, task 
 			}
 		}
 
+		// For try tasks, extract try/catch configuration
+		if task.TaskType == "try" {
+			if tryConfig, exists := inputMap["try_config"]; exists {
+				// Merge try/catch configuration into parameters
+				if tryConfigMap, ok := tryConfig.(map[string]interface{}); ok {
+					for key, value := range tryConfigMap {
+						parameters[key] = value
+					}
+					p.logger.Debug("Extracted try task configuration",
+						"task_name", task.Name,
+						"config_keys", getMapKeys(tryConfigMap))
+				}
+			}
+		}
+
 		// Pass through other input data (excluding processed keys)
 		for key, value := range inputMap {
-			if key != "set_data" && key != "call_config" {
+			if key != "set_data" && key != "call_config" && key != "task_definition" {
 				inputData[key] = value
 			}
 		}

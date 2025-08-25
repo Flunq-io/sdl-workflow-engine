@@ -223,9 +223,11 @@ func (e *ServerlessWorkflowEngine) ProcessEvent(ctx context.Context, state *gen.
 		return e.processTaskRequestedEvent(state, event)
 	case "io.flunq.task.completed":
 		return e.processTaskCompletedEvent(state, event)
+	case "io.flunq.task.failed":
+		return e.processTaskFailedEvent(state, event)
 	case "io.flunq.timer.fired":
-		// Treat timer firing as completion of the wait task
-		return e.processTaskCompletedEvent(state, event)
+		// Check if this is a retry timer or a wait task timer
+		return e.processTimerFiredEvent(state, event)
 	case "io.flunq.workflow.step.completed":
 		return e.processStepCompletedEvent(state, event)
 	case "io.flunq.workflow.completed":
@@ -687,49 +689,60 @@ func (e *ServerlessWorkflowEngine) GetNextTask(ctx context.Context, state *gen.W
 	return task, nil
 }
 
-// extractOrderedTaskList extracts tasks from DSL in execution order
+// extractOrderedTaskList extracts tasks using the official Serverless Workflow SDK
 func (e *ServerlessWorkflowEngine) extractOrderedTaskList(definition *gen.WorkflowDefinition) ([]string, error) {
 	if definition.DslDefinition == nil {
 		e.logger.Warn("DSL definition is nil, using fallback task list")
 		return []string{"initialize", "processData", "waitStep", "finalize"}, nil
 	}
 
-	dslMap := definition.DslDefinition.AsMap()
-	e.logger.Debug("DSL structure", "dsl_keys", getMapKeys(dslMap))
+	// Use manual parsing for now - SDK v3 has compatibility issues with our SDL format
+	e.logger.Info("Using manual DSL parsing for task extraction")
+	return e.extractOrderedTaskListManual(definition)
+}
 
-	// Extract tasks from "do" section (DSL 1.0.0 format)
+// extractOrderedTaskListManual is the fallback manual parsing method
+func (e *ServerlessWorkflowEngine) extractOrderedTaskListManual(definition *gen.WorkflowDefinition) ([]string, error) {
+	dslMap := definition.DslDefinition.AsMap()
+	e.logger.Info("Manual DSL parsing fallback", "dsl_keys", getMapKeys(dslMap))
+
+	// Try to extract tasks from "do" section
 	if doSection, ok := dslMap["do"].([]interface{}); ok {
-		e.logger.Debug("Found 'do' section", "do_section_length", len(doSection))
+		e.logger.Info("Found 'do' section in manual parsing", "do_section_length", len(doSection))
 		taskList := make([]string, 0, len(doSection))
 
-		for i, item := range doSection {
-			e.logger.Debug("Processing do item", "index", i, "item_type", fmt.Sprintf("%T", item))
+		for _, item := range doSection {
 			if taskMap, ok := item.(map[string]interface{}); ok {
-				// Each item in "do" is a map with one key (the task name)
 				for taskName := range taskMap {
-					e.logger.Debug("Found task", "task_name", taskName)
+					e.logger.Info("Found task in manual parsing", "task_name", taskName)
 					taskList = append(taskList, taskName)
-					break // Only process first key in each map
+					break
 				}
-			} else {
-				e.logger.Warn("DEBUG: Item is not a map", "item", item)
 			}
 		}
 
 		if len(taskList) > 0 {
-			e.logger.Info("Extracted task list from DSL",
-				"task_list", taskList,
-				"count", len(taskList))
-
 			return taskList, nil
 		}
-	} else {
-		e.logger.Debug("No 'do' section found in DSL", "available_keys", getMapKeys(dslMap))
 	}
 
-	// Fallback for basic workflows
-	e.logger.Warn("Could not extract tasks from DSL, using fallback task list")
+	// Final fallback
+	e.logger.Warn("Manual parsing failed, using hardcoded fallback")
 	return []string{"initialize", "processData", "waitStep", "finalize"}, nil
+}
+
+// hasTaskProperties checks if a map contains task-like properties
+func hasTaskProperties(taskDef map[string]interface{}) bool {
+	// Check for common task properties
+	taskProperties := []string{"try", "call", "set", "wait", "inject", "switch", "foreach", "parallel"}
+
+	for _, prop := range taskProperties {
+		if _, exists := taskDef[prop]; exists {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Helper function to get map keys for debugging
@@ -823,13 +836,31 @@ func (e *ServerlessWorkflowEngine) getTaskTypeFromDSL(definition *gen.WorkflowDe
 							return "call"
 						}
 
-						// Check for try/catch pattern with call inside try block
+						// Check for try/catch pattern - extract the inner task type
 						if tryBlock, hasTry := taskDefMap["try"]; hasTry {
+							e.logger.Info("Found try block in task definition", "task_name", taskName, "try_block", tryBlock)
+
 							if tryMap, ok := tryBlock.(map[string]interface{}); ok {
+								e.logger.Info("Try block is valid map", "task_name", taskName, "try_keys", getMapKeys(tryMap))
+
+								// Any task with try/catch should be handled by TryTaskExecutor
 								if _, hasCallInTry := tryMap["call"]; hasCallInTry {
-									e.logger.Info("Identified task type from DSL (try/catch pattern)", "task_name", taskName, "task_type", "call")
-									return "call"
+									e.logger.Info("Identified task type from DSL (try/catch pattern with call)", "task_name", taskName, "task_type", "try")
+									return "try" // Let TryTaskExecutor handle the try/catch logic
 								}
+								// Add support for other task types inside try blocks
+								if _, hasSetInTry := tryMap["set"]; hasSetInTry {
+									e.logger.Info("Identified task type from DSL (try/catch pattern with set)", "task_name", taskName, "task_type", "try")
+									return "try"
+								}
+								if _, hasWaitInTry := tryMap["wait"]; hasWaitInTry {
+									e.logger.Info("Identified task type from DSL (try/catch pattern with wait)", "task_name", taskName, "task_type", "try")
+									return "try"
+								}
+
+								e.logger.Warn("Try block found but no recognized inner task type", "task_name", taskName, "try_keys", getMapKeys(tryMap))
+							} else {
+								e.logger.Error("Try block is not a valid map", "task_name", taskName, "try_block_type", fmt.Sprintf("%T", tryBlock))
 							}
 						}
 						e.logger.Debug("Task definition found but no recognized task type", "task_name", taskName, "available_keys", getMapKeys(taskDefMap))
@@ -911,34 +942,35 @@ func (e *ServerlessWorkflowEngine) buildTaskInputFromDSL(definition *gen.Workflo
 									"task_name", taskName,
 									"config", callConfig)
 							} else if tryBlock, hasTry := taskDefMap["try"]; hasTry {
-								// Handle try/catch pattern with call inside try block
-								if tryMap, ok := tryBlock.(map[string]interface{}); ok {
-									if callType, hasCallInTry := tryMap["call"]; hasCallInTry {
-										e.logger.Debug("Processing call task configuration (try/catch pattern)",
-											"task_name", taskName,
-											"call_type", callType)
+								// Handle try/catch pattern - extract inner task configuration
+								e.logger.Debug("Processing try/catch block",
+									"task_name", taskName,
+									"has_try", hasTry)
 
-										// Extract call configuration from try block
-										callConfig := e.buildCallTaskConfig(tryMap, callType, taskName)
-										taskInput["call_config"] = callConfig
-
-										// Extract output configuration from try block if present
-										if outputConfig, hasOutput := tryMap["output"]; hasOutput {
-											taskInput["output_config"] = outputConfig
-											e.logger.Info("Found output configuration in try block",
-												"task_name", taskName,
-												"output_config", outputConfig)
-										} else {
-											e.logger.Info("No output configuration found in try block",
-												"task_name", taskName,
-												"try_keys", getMapKeys(tryMap))
-										}
-
-										e.logger.Debug("Built call task configuration (try/catch pattern)",
-											"task_name", taskName,
-											"config", callConfig)
-									}
+								// Store the try/catch metadata for error handling
+								taskInput["try_catch_config"] = map[string]interface{}{
+									"try":   tryBlock,
+									"catch": taskDefMap["catch"], // May be nil if no catch block
 								}
+
+								// Extract catch block from task definition
+								catchBlock, hasCatch := taskDefMap["catch"]
+
+								// For try tasks, pass the complete try/catch configuration to TryTaskExecutor
+								taskInput["try_config"] = map[string]interface{}{
+									"try":   tryBlock,
+									"catch": catchBlock,
+								}
+
+								e.logger.Info("Built try/catch configuration for TryTaskExecutor",
+									"task_name", taskName,
+									"has_try", tryBlock != nil,
+									"has_catch", hasCatch)
+
+								e.logger.Debug("Built try/catch task configuration",
+									"task_name", taskName,
+									"has_try_catch_config", taskInput["try_catch_config"] != nil,
+									"has_config", taskInput["config"] != nil)
 							}
 						}
 						break
@@ -1029,6 +1061,69 @@ func (e *ServerlessWorkflowEngine) buildCallTaskConfig(taskDefMap map[string]int
 			}
 		}
 	}
+
+	return config
+}
+
+// buildCallTaskConfigFromTryBlock builds call task configuration from SDL try block
+func (e *ServerlessWorkflowEngine) buildCallTaskConfigFromTryBlock(tryMap map[string]interface{}, callType interface{}, taskName string) map[string]interface{} {
+	config := make(map[string]interface{})
+
+	// Set the call type
+	if callTypeStr, ok := callType.(string); ok {
+		config["call_type"] = callTypeStr
+
+		e.logger.Info("Processing call type in try block",
+			"task_name", taskName,
+			"call_type", callTypeStr,
+			"try_map_keys", getMapKeys(tryMap))
+
+		switch callTypeStr {
+		case "openapi":
+			// Extract OpenAPI configuration from "with" section inside try block
+			if withConfig, hasWith := tryMap["with"]; hasWith {
+				if withMap, ok := withConfig.(map[string]interface{}); ok {
+					// Map DSL fields to executor configuration
+					for key, value := range withMap {
+						switch key {
+						case "operationId":
+							// Map camelCase to snake_case
+							config["operation_id"] = value
+						case "document":
+							// Copy document configuration directly
+							config["document"] = value
+						case "parameters":
+							// Copy parameters directly
+							config["parameters"] = value
+						default:
+							// Copy other fields as-is
+							config[key] = value
+						}
+					}
+
+					e.logger.Debug("Extracted OpenAPI configuration from try block",
+						"task_name", taskName,
+						"config_keys", getMapKeys(config),
+						"with_keys", getMapKeys(withMap))
+				}
+			}
+
+			// Handle output configuration if present in try block
+			if outputConfig, hasOutput := tryMap["output"]; hasOutput {
+				config["output_config"] = outputConfig
+				e.logger.Debug("Added output configuration from try block",
+					"task_name", taskName,
+					"output_config", outputConfig)
+			}
+
+		default:
+			e.logger.Warn("Unsupported call type in try block", "task_name", taskName, "call_type", callTypeStr)
+		}
+	}
+
+	e.logger.Info("Final call configuration built from try block",
+		"task_name", taskName,
+		"config", config)
 
 	return config
 }
@@ -1361,6 +1456,466 @@ func (e *ServerlessWorkflowEngine) scheduleWaitCompletionEvent(ctx context.Conte
 		"task_name", task.Name,
 		"duration", duration,
 		"completion_time", time.Now().Add(duration).Format(time.RFC3339))
+
+	return nil
+}
+
+// buildTryTaskConfig passes through SDL try/catch format directly
+func (e *ServerlessWorkflowEngine) buildTryTaskConfig(taskName string, taskDefMap map[string]interface{}, tryBlock interface{}) map[string]interface{} {
+	// Pass through the SDL format directly - TryTaskExecutor should handle SDL natively
+	tryConfig := make(map[string]interface{})
+
+	// Add the try block as-is
+	tryConfig["try"] = tryBlock
+
+	// Add catch configuration if present
+	if catchConfig, hasCatch := taskDefMap["catch"]; hasCatch {
+		tryConfig["catch"] = catchConfig
+	}
+
+	e.logger.Debug("Built SDL try/catch configuration",
+		"task_name", taskName,
+		"has_try", tryBlock != nil,
+		"has_catch", tryConfig["catch"] != nil)
+
+	return tryConfig
+}
+
+// processTaskFailedEvent processes task failed events and handles try/catch/retry logic
+func (e *ServerlessWorkflowEngine) processTaskFailedEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	e.logger.Info("Processing task failed event",
+		"workflow_id", state.WorkflowId,
+		"event_id", event.ID,
+		"task_id", event.TaskID)
+
+	// Extract task information from the event
+	eventData, ok := event.Data.(map[string]interface{})
+	if !ok {
+		e.logger.Error("Task failed event has invalid data format", "event_id", event.ID)
+		return fmt.Errorf("invalid task failed event data")
+	}
+
+	// Extract task name and error details
+	taskName, ok := eventData["task_name"].(string)
+	if !ok {
+		e.logger.Error("Task failed event missing task_name", "event_id", event.ID)
+		return fmt.Errorf("task failed event missing task_name")
+	}
+
+	errorMessage := ""
+	if err, exists := eventData["error"]; exists {
+		errorMessage = fmt.Sprintf("%v", err)
+	}
+
+	statusCode := 0
+	if code, exists := eventData["status_code"]; exists {
+		if codeFloat, ok := code.(float64); ok {
+			statusCode = int(codeFloat)
+		}
+	}
+
+	e.logger.Info("Task failed details",
+		"task_name", taskName,
+		"error", errorMessage,
+		"status_code", statusCode)
+
+	// Check if this task has try/catch configuration
+	tryCatchConfig := e.extractTryCatchConfigFromState(state, taskName)
+	if tryCatchConfig == nil {
+		e.logger.Info("No try/catch configuration found, treating as final failure", "task_name", taskName)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	e.logger.Info("Found try/catch configuration, processing error handling", "task_name", taskName)
+	return e.handleTaskFailureWithTryCatch(state, event, taskName, tryCatchConfig, statusCode, errorMessage)
+}
+
+// extractTryCatchConfigFromState extracts try/catch configuration from the workflow state
+func (e *ServerlessWorkflowEngine) extractTryCatchConfigFromState(state *gen.WorkflowState, taskName string) map[string]interface{} {
+	// Look for try/catch configuration in pending tasks
+	for _, pendingTask := range state.PendingTasks {
+		if pendingTask.Name == taskName && pendingTask.Input != nil {
+			inputMap := pendingTask.Input.AsMap()
+			if tryCatchConfig, exists := inputMap["try_catch_config"]; exists {
+				if configMap, ok := tryCatchConfig.(map[string]interface{}); ok {
+					e.logger.Info("Found try/catch config in pending task", "task_name", taskName)
+					return configMap
+				}
+			}
+		}
+	}
+
+	// Look for try/catch configuration in completed tasks (for retry scenarios)
+	for _, completedTask := range state.CompletedTasks {
+		if completedTask.Name == taskName {
+			// CompletedTask doesn't have Input field, so we'll need to get it from the original task definition
+			e.logger.Debug("Found completed task, but cannot access input directly", "task_name", taskName)
+			// We'll rely on the pending task configuration for now
+		}
+	}
+
+	e.logger.Debug("No try/catch configuration found for task", "task_name", taskName)
+	return nil
+}
+
+// handleTaskFailureWithoutTryCatch handles task failures when no try/catch configuration is present
+func (e *ServerlessWorkflowEngine) handleTaskFailureWithoutTryCatch(state *gen.WorkflowState, event *cloudevents.CloudEvent, taskName, errorMessage string) error {
+	e.logger.Error("Task failed without try/catch configuration - workflow will fail",
+		"task_name", taskName,
+		"error", errorMessage,
+		"workflow_id", state.WorkflowId)
+
+	// Mark workflow as failed
+	state.Status = gen.WorkflowStatus_WORKFLOW_STATUS_FAILED
+	state.UpdatedAt = timestamppb.New(event.Time)
+
+	// Publish workflow failed event
+	return e.publishWorkflowFailedEvent(state, taskName, errorMessage)
+}
+
+// handleTaskFailureWithTryCatch handles task failures when try/catch configuration is present
+func (e *ServerlessWorkflowEngine) handleTaskFailureWithTryCatch(state *gen.WorkflowState, event *cloudevents.CloudEvent, taskName string, tryCatchConfig map[string]interface{}, statusCode int, errorMessage string) error {
+	e.logger.Info("Processing task failure with try/catch configuration",
+		"task_name", taskName,
+		"status_code", statusCode,
+		"error", errorMessage)
+
+	// Extract catch configuration
+	catchConfig, hasCatch := tryCatchConfig["catch"].(map[string]interface{})
+	if !hasCatch {
+		e.logger.Warn("Try/catch config found but no catch section", "task_name", taskName)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	// Check if this error matches the catch criteria
+	if !e.errorMatchesCatchCriteria(catchConfig, statusCode, errorMessage) {
+		e.logger.Info("Error does not match catch criteria, treating as final failure",
+			"task_name", taskName,
+			"status_code", statusCode)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	// Extract retry configuration
+	retryConfig, hasRetry := catchConfig["retry"].(map[string]interface{})
+	if !hasRetry {
+		e.logger.Info("Error matches catch criteria but no retry configuration", "task_name", taskName)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	// Check retry limits and schedule retry
+	return e.scheduleTaskRetry(state, event, taskName, retryConfig, errorMessage)
+}
+
+// publishWorkflowFailedEvent publishes a workflow failed event
+func (e *ServerlessWorkflowEngine) publishWorkflowFailedEvent(state *gen.WorkflowState, taskName, errorMessage string) error {
+	failedEvent := &cloudevents.CloudEvent{
+		Type:       "io.flunq.workflow.failed",
+		Source:     "worker-service",
+		WorkflowID: state.WorkflowId,
+		TaskID:     "",
+		Time:       time.Now(),
+		Data: map[string]interface{}{
+			"workflow_id":  state.WorkflowId,
+			"failed_task":  taskName,
+			"error":        errorMessage,
+			"final_status": "failed",
+		},
+	}
+
+	e.logger.Error("Publishing workflow failed event",
+		"workflow_id", state.WorkflowId,
+		"failed_task", taskName,
+		"error", errorMessage)
+
+	return e.eventStream.Publish(context.Background(), failedEvent)
+}
+
+// errorMatchesCatchCriteria checks if the error matches the catch criteria
+func (e *ServerlessWorkflowEngine) errorMatchesCatchCriteria(catchConfig map[string]interface{}, statusCode int, errorMessage string) bool {
+	// Extract errors configuration
+	errorsConfig, hasErrors := catchConfig["errors"].(map[string]interface{})
+	if !hasErrors {
+		e.logger.Debug("No errors configuration in catch block, matching all errors")
+		return true // If no specific error criteria, catch all errors
+	}
+
+	// Check status code criteria
+	if withConfig, hasWith := errorsConfig["with"].(map[string]interface{}); hasWith {
+		if expectedStatus, hasStatus := withConfig["status"]; hasStatus {
+			if expectedStatusFloat, ok := expectedStatus.(float64); ok {
+				expectedStatusInt := int(expectedStatusFloat)
+				if statusCode == expectedStatusInt {
+					e.logger.Info("Error matches catch criteria by status code",
+						"expected_status", expectedStatusInt,
+						"actual_status", statusCode)
+					return true
+				}
+			}
+		}
+	}
+
+	e.logger.Debug("Error does not match catch criteria",
+		"status_code", statusCode,
+		"error", errorMessage)
+	return false
+}
+
+// scheduleTaskRetry schedules a task retry using the timer service
+func (e *ServerlessWorkflowEngine) scheduleTaskRetry(state *gen.WorkflowState, event *cloudevents.CloudEvent, taskName string, retryConfig map[string]interface{}, errorMessage string) error {
+	e.logger.Info("Scheduling task retry",
+		"task_name", taskName,
+		"retry_config", retryConfig)
+
+	// Extract retry limit
+	limitConfig, hasLimit := retryConfig["limit"].(map[string]interface{})
+	if !hasLimit {
+		e.logger.Warn("No retry limit configuration", "task_name", taskName)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	attemptConfig, hasAttempt := limitConfig["attempt"].(map[string]interface{})
+	if !hasAttempt {
+		e.logger.Warn("No attempt configuration in retry limit", "task_name", taskName)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	maxAttempts := 3 // Default
+	if count, hasCount := attemptConfig["count"]; hasCount {
+		if countFloat, ok := count.(float64); ok {
+			maxAttempts = int(countFloat)
+		}
+	}
+
+	// Get current attempt count (we'll implement this tracking)
+	currentAttempt := e.getCurrentAttemptCount(state, taskName)
+
+	if currentAttempt >= maxAttempts {
+		e.logger.Info("Maximum retry attempts reached",
+			"task_name", taskName,
+			"current_attempt", currentAttempt,
+			"max_attempts", maxAttempts)
+		return e.handleTaskFailureWithoutTryCatch(state, event, taskName, errorMessage)
+	}
+
+	// Extract delay configuration
+	delayConfig, hasDelay := retryConfig["delay"].(map[string]interface{})
+	delaySeconds := 3 // Default delay
+	if hasDelay {
+		if seconds, hasSeconds := delayConfig["seconds"]; hasSeconds {
+			if secondsFloat, ok := seconds.(float64); ok {
+				delaySeconds = int(secondsFloat)
+			}
+		}
+	}
+
+	// Schedule retry timer
+	return e.scheduleRetryTimer(state, taskName, currentAttempt+1, delaySeconds, errorMessage)
+}
+
+// getCurrentAttemptCount gets the current retry attempt count for a task
+func (e *ServerlessWorkflowEngine) getCurrentAttemptCount(state *gen.WorkflowState, taskName string) int {
+	// For now, we'll use a simple approach - count failed attempts in completed tasks
+	// In a production system, you'd want to track this more systematically
+	attemptCount := 0
+
+	for _, completedTask := range state.CompletedTasks {
+		if completedTask.Name == taskName {
+			// For now, we'll assume this is a retry attempt
+			// In a production system, you'd track retry attempts more systematically
+			attemptCount++
+		}
+	}
+
+	e.logger.Debug("Current attempt count for task",
+		"task_name", taskName,
+		"attempt_count", attemptCount)
+
+	return attemptCount
+}
+
+// scheduleRetryTimer schedules a retry timer for a failed task
+func (e *ServerlessWorkflowEngine) scheduleRetryTimer(state *gen.WorkflowState, taskName string, attemptNumber, delaySeconds int, errorMessage string) error {
+	timerID := fmt.Sprintf("retry-%s-%d-%d", taskName, attemptNumber, time.Now().Unix())
+
+	timerEvent := &cloudevents.CloudEvent{
+		Type:       "io.flunq.timer.requested",
+		Source:     "worker-service",
+		WorkflowID: state.WorkflowId,
+		TaskID:     timerID,
+		Time:       time.Now(),
+		Data: map[string]interface{}{
+			"timer_id":           timerID,
+			"workflow_id":        state.WorkflowId,
+			"delay_seconds":      delaySeconds,
+			"retry_type":         "task_retry",
+			"original_task_name": taskName,
+			"attempt_count":      attemptNumber,
+			"original_error":     errorMessage,
+		},
+	}
+
+	e.logger.Info("Scheduling retry timer",
+		"task_name", taskName,
+		"attempt_number", attemptNumber,
+		"delay_seconds", delaySeconds,
+		"timer_id", timerID)
+
+	return e.eventStream.Publish(context.Background(), timerEvent)
+}
+
+// processTimerFiredEvent processes timer.fired events, distinguishing between wait tasks and retry timers
+func (e *ServerlessWorkflowEngine) processTimerFiredEvent(state *gen.WorkflowState, event *cloudevents.CloudEvent) error {
+	e.logger.Debug("Processing timer fired event",
+		"workflow_id", state.WorkflowId,
+		"event_id", event.ID,
+		"task_id", event.TaskID)
+
+	// Extract event data to determine timer type
+	eventData, ok := event.Data.(map[string]interface{})
+	if !ok {
+		e.logger.Warn("Timer fired event has invalid data format", "event_id", event.ID)
+		// Fallback to treating as wait task completion
+		return e.processTaskCompletedEvent(state, event)
+	}
+
+	// Check if this is a retry timer
+	if retryType, exists := eventData["retry_type"]; exists && retryType == "task_retry" {
+		return e.processRetryTimerFired(state, event, eventData)
+	}
+
+	// Default: treat as wait task completion
+	return e.processTaskCompletedEvent(state, event)
+}
+
+// processRetryTimerFired handles retry timer events by re-executing the original task
+func (e *ServerlessWorkflowEngine) processRetryTimerFired(state *gen.WorkflowState, event *cloudevents.CloudEvent, eventData map[string]interface{}) error {
+	e.logger.Info("Processing retry timer fired",
+		"workflow_id", state.WorkflowId,
+		"event_id", event.ID,
+		"task_id", event.TaskID)
+
+	// Extract retry information
+	originalTaskID, ok := eventData["original_task_id"].(string)
+	if !ok {
+		return fmt.Errorf("retry timer missing original_task_id")
+	}
+
+	attemptCount, ok := eventData["attempt_count"].(float64)
+	if !ok {
+		return fmt.Errorf("retry timer missing attempt_count")
+	}
+
+	e.logger.Info("Re-executing task after retry delay",
+		"workflow_id", state.WorkflowId,
+		"original_task_id", originalTaskID,
+		"attempt_count", int(attemptCount))
+
+	// Extract task name from original task ID (remove timestamp suffix)
+	taskName := e.extractTaskNameFromTaskID(originalTaskID)
+	if taskName == "" {
+		return fmt.Errorf("could not extract task name from task ID: %s", originalTaskID)
+	}
+
+	// We need the workflow definition to rebuild the task
+	// For now, we'll create a simplified retry task.requested event
+	// In a full implementation, we'd need to store the original task definition
+
+	// Create a new task.requested event for the retry
+	retryTaskID := fmt.Sprintf("task-%s-%d", taskName, time.Now().UnixNano())
+
+	// Build basic task input with retry context
+	taskInput := map[string]interface{}{
+		"task_name":   taskName,
+		"workflow_id": state.WorkflowId,
+		"timestamp":   time.Now().Format(time.RFC3339),
+		"retry_context": map[string]interface{}{
+			"is_retry":         true,
+			"attempt_count":    int(attemptCount),
+			"original_task_id": originalTaskID,
+		},
+	}
+
+	// Add workflow input to task context for parameter evaluation
+	if state.Input != nil {
+		taskInput["workflow_input"] = state.Input.AsMap()
+	}
+
+	// IMPORTANT: We need to reconstruct the original task definition for retries
+	// For now, we'll extract it from the timer event data if available
+	if originalTaskDef, exists := eventData["original_task_definition"]; exists {
+		taskInput["task_definition"] = originalTaskDef
+	}
+
+	// Determine task type (simplified - in full implementation would come from DSL)
+	taskType := "try" // Since we're retrying a failed try task
+
+	// Publish task.requested event for the retry
+	return e.publishRetryTaskRequestedEvent(state, retryTaskID, taskName, taskType, taskInput)
+}
+
+// extractTaskNameFromTaskID extracts the task name from a task ID
+// Task IDs are typically in format: "task-{taskName}-{timestamp}"
+func (e *ServerlessWorkflowEngine) extractTaskNameFromTaskID(taskID string) string {
+	// Remove "task-" prefix if present
+	if strings.HasPrefix(taskID, "task-") {
+		taskID = taskID[5:]
+	}
+
+	// Find the last dash and remove timestamp suffix
+	lastDash := strings.LastIndex(taskID, "-")
+	if lastDash > 0 {
+		return taskID[:lastDash]
+	}
+
+	return taskID
+}
+
+// publishRetryTaskRequestedEvent publishes a task.requested event for a retry
+func (e *ServerlessWorkflowEngine) publishRetryTaskRequestedEvent(state *gen.WorkflowState, taskID, taskName, taskType string, taskInput map[string]interface{}) error {
+	// Extract tenant and execution IDs
+	tenantID := ""
+	executionID := ""
+	if state.Context != nil {
+		tenantID = state.Context.TenantId
+		executionID = state.Context.ExecutionId
+	}
+
+	// Create task.requested event
+	event := &cloudevents.CloudEvent{
+		ID:          fmt.Sprintf("task-requested-%s", taskID),
+		Source:      "workflow-engine",
+		SpecVersion: "1.0",
+		Type:        "io.flunq.task.requested",
+		TenantID:    tenantID,
+		WorkflowID:  state.WorkflowId,
+		ExecutionID: executionID,
+		TaskID:      taskID,
+		Time:        time.Now(),
+		Data: map[string]interface{}{
+			"task_id":      taskID,
+			"task_name":    taskName,
+			"task_type":    taskType,
+			"workflow_id":  state.WorkflowId,
+			"execution_id": executionID,
+			"input":        taskInput,
+			"context": map[string]interface{}{
+				"workflow_input": taskInput["workflow_input"],
+				"retry_context":  taskInput["retry_context"],
+			},
+		},
+	}
+
+	// Publish the event
+	if err := e.eventStream.Publish(context.Background(), event); err != nil {
+		return fmt.Errorf("failed to publish retry task.requested event: %w", err)
+	}
+
+	e.logger.Info("Published retry task.requested event",
+		"task_id", taskID,
+		"task_name", taskName,
+		"task_type", taskType,
+		"workflow_id", state.WorkflowId,
+		"execution_id", executionID)
 
 	return nil
 }

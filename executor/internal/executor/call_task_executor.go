@@ -180,13 +180,16 @@ func (e *CallTaskExecutor) executeOpenAPICall(ctx context.Context, task *TaskReq
 		ExecutedAt:  time.Now(),
 	}
 
-	// If we had an HTTP error, include the error details but still return the response
+	// If we had an HTTP error, include the error details and return the error for retry handling
 	if err != nil {
 		result.Error = err.Error()
 		e.logger.Warn("OpenAPI call returned HTTP error but response data is available",
 			zap.String("task_id", task.TaskID),
 			zap.Int("status_code", response.StatusCode),
 			zap.Error(err))
+
+		// Return the error so TryTaskExecutor can handle retries
+		return result, err
 	}
 
 	return result, nil
@@ -342,7 +345,7 @@ func (e *CallTaskExecutor) createWorkflowError(errorMsg string, task *TaskReques
 	var endpoint, method string
 	if task.Config != nil && task.Config.Parameters != nil {
 		if callConfig, err := ParseCallConfig(task.Config.Parameters); err == nil {
-			if callConfig.IsOpenAPICall() {
+			if callConfig.IsOpenAPICall() && callConfig.Document != nil {
 				endpoint = callConfig.Document.Endpoint
 				method = "OpenAPI"
 			} else {

@@ -75,13 +75,18 @@ func ParseTaskRequestFromEvent(event *cloudevents.CloudEvent) (*TaskRequest, err
 		workflowID = getStringFromData(data, "workflow_id")
 	}
 
+	taskType := getStringFromData(data, "task_type")
+
 	request := &TaskRequest{
 		TaskID:      getStringFromData(data, "task_id"),
 		TaskName:    getStringFromData(data, "task_name"),
-		TaskType:    getStringFromData(data, "task_type"),
+		TaskType:    taskType,
 		WorkflowID:  workflowID,
 		ExecutionID: executionID,
 	}
+
+	// Debug logging to see what task type is being parsed
+	fmt.Printf("🔍 ParseTaskRequestFromEvent DEBUG - TaskType: '%s', TaskName: '%s'\n", taskType, request.TaskName)
 
 	// (debug) Parsed TaskRequest summary
 	// fmt.Printf("Parsed TaskRequest - workflow=%s exec=%s task=%s\n", request.WorkflowID, request.ExecutionID, request.TaskName)
